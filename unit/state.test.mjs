@@ -212,3 +212,12 @@ describe('ModuleState', () => {
 		assert.equal(state.isSocketConnected, false)
 	})
 })
+
+test('applyMessage puts a new message at the front of the held thread once, so the messages hash matches the app', () => {
+	const state = new ModuleState()
+	state.applyState(snapshot({ messages: [{ id: 'm1', text: 'old', sender: 'Host', isHighPriority: false, timestamp: '2026-10-11T10:00:00Z' }] }))
+	const message = { id: 'm2', text: 'new', sender: 'Host', isHighPriority: false, timestamp: '2026-10-11T10:01:00Z' }
+	state.applyMessage(message)
+	state.applyMessage(message)
+	assert.deepEqual(state.snapshot.messages.map((m) => m.id), ['m2', 'm1'])
+})

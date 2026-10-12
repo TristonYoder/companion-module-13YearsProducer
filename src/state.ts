@@ -149,8 +149,19 @@ export class ModuleState {
 		return this.protoVersion === 2 ? STALE_AFTER_MS_V2 : STALE_AFTER_MS
 	}
 
+	/**
+	 * Records the message and, when a snapshot is held, adds it to the front of
+	 * `snapshot.messages` (newest first, de-duplicated by id). The app sends the
+	 * `message` event before the `state` event that carries the updated thread,
+	 * so without this a digest arriving in between would see a messages hash that
+	 * differs from the app's and trigger a needless full fetch.
+	 */
 	applyMessage(message: InterTeamMessage): void {
 		this.lastMessage = message
+		const snapshot = this.snapshot
+		if (!snapshot) return
+		if (snapshot.messages.some((m) => m.id === message.id)) return
+		snapshot.messages = [message, ...snapshot.messages]
 	}
 
 	setSocketConnected(connected: boolean): void {
