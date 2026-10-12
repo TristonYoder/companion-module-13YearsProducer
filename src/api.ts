@@ -703,6 +703,9 @@ export class ControlSocket {
 				case 'timer':
 					this.handlers.onTimer?.(parsed.data)
 					return
+				case 'digest':
+					this.handlers.onDigest?.(parsed.data)
+					return
 			}
 		}
 	}

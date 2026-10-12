@@ -370,3 +370,19 @@ describe('v2 vs legacy accessors', () => {
 		assert.equal(state.sync.hasOffset, false)
 	})
 })
+
+test('ControlSocket hands every server event type to its handler, digest included', async () => {
+	const { ControlSocket } = await import('../dist/api.js')
+	const seen = []
+	const socket = new ControlSocket(() => ({ host: 'h', port: 1 }), {
+		onHello: () => seen.push('hello'),
+		onState: () => seen.push('state'),
+		onMessage: () => seen.push('message'),
+		onTimer: () => seen.push('timer'),
+		onDigest: () => seen.push('digest'),
+	})
+	for (const event of ['hello', 'state', 'message', 'timer', 'digest']) {
+		socket.handleMessage(JSON.stringify({ event, data: {} }))
+	}
+	assert.deepEqual(seen, ['hello', 'state', 'message', 'timer', 'digest'])
+})
