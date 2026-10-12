@@ -352,6 +352,30 @@ describe('sync protocol v2', () => {
 		assert.equal(link.protoReply.data.version, 2)
 	})
 
+	// v2.1 amendments: an app that predates them sends no `epoch`, and these skip.
+	test('v2.1: hello carries a positive 31-bit epoch, and digests repeat it', { timeout: 20000 }, async (t) => {
+		if (!link.supported) return t.skip('app does not speak sync protocol v2')
+		const deadline = Date.now() + 5000
+		while (!link.hello && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 50))
+		if (!link.hello) return t.skip('no hello received')
+		if (link.hello.epoch === undefined) return t.skip('app does not send epoch (sync protocol v2.0)')
+		assert.ok(Number.isInteger(link.hello.epoch))
+		assert.ok(link.hello.epoch > 0 && link.hello.epoch <= 0x7fffffff, 'positive 31-bit integer')
+
+		const until = Date.now() + 13000
+		while (link.digests.length === 0 && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 100))
+		assert.ok(link.digests.length > 0, 'a digest within 13 s')
+		assert.equal(link.digests[0].epoch, link.hello.epoch)
+		for (const timer of link.timers) if (timer.epoch !== undefined) assert.equal(timer.epoch, link.hello.epoch)
+	})
+
+	test('v2.1: GET /v1/state agrees with hello about the epoch', async (t) => {
+		if (!link.supported) return t.skip('app does not speak sync protocol v2')
+		if (link.hello?.epoch === undefined) return t.skip('app does not send epoch (sync protocol v2.0)')
+		const state = await api.getState()
+		if (state.epoch !== undefined) assert.equal(state.epoch, link.hello.epoch)
+	})
+
 	test('the sync op echoes t0 and answers t1 <= t2, over the socket and REST', async (t) => {
 		if (!link.supported) return t.skip('app does not speak sync protocol v2')
 		const t0 = Date.now()

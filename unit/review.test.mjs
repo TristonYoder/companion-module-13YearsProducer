@@ -42,9 +42,10 @@ describe('revision guard', () => {
 		assert.equal(state.applyState(snap({ rev: 5, appMode: 'a' })), true)
 		assert.equal(state.applyState(snap({ rev: 4, appMode: 'b' })), false)
 		assert.equal(state.snapshot.appMode, 'a')
-		assert.equal(state.applyState(snap({ rev: 5, appMode: 'c' })), true)
+		assert.equal(state.applyState(snap({ rev: 5, appMode: 'c' })), false)
+		assert.equal(state.applyState(snap({ rev: 6, appMode: 'c' })), true)
 		assert.equal(state.applyState(snap({ rev: undefined, appMode: 'd' })), true)
-		assert.equal(state.rev, 5)
+		assert.equal(state.rev, 6)
 	})
 
 	test('resetRev lets a restarted app, counting from 1 again, through', () => {
@@ -85,7 +86,12 @@ describe('definition signature', () => {
 		const state = new ModuleState()
 		state.applyState(base())
 		const before = state.dynamicSignature()
-		state.applyState({ ...base(), rev: 2, timer: timer(10, item('a', 60)), plan: { ...base().plan, activeItemIndex: 1 } })
+		state.applyState({
+			...base(),
+			rev: 2,
+			timer: timer(10, item('a', 60)),
+			plan: { ...base().plan, activeItemIndex: 1 },
+		})
 		assert.equal(state.dynamicSignature(), before)
 	})
 
@@ -93,12 +99,16 @@ describe('definition signature', () => {
 		const state = new ModuleState()
 		state.applyState(base())
 		const before = state.dynamicSignature()
-		state.applyState({ ...base(), roles: [{ id: 'r1', name: 'Hosts' }] })
+		state.applyState({ ...base(), rev: 2, roles: [{ id: 'r1', name: 'Hosts' }] })
 		const renamed = state.dynamicSignature()
 		assert.notEqual(renamed, before)
-		state.applyState({ ...base(), plan: { title: 'x', items: [item('a', 61), item('b', 120)], activeItemIndex: 0 } })
+		state.applyState({
+			...base(),
+			rev: 3,
+			plan: { title: 'x', items: [item('a', 61), item('b', 120)], activeItemIndex: 0 },
+		})
 		assert.notEqual(state.dynamicSignature(), before)
-		state.applyState({ ...base(), schedules: { entries: [{ id: 's', title: 'Nine' }], nextId: 's' } })
+		state.applyState({ ...base(), rev: 4, schedules: { entries: [{ id: 's', title: 'Nine' }], nextId: 's' } })
 		assert.notEqual(state.dynamicSignature(), before)
 	})
 })
@@ -226,14 +236,14 @@ describe('rundown paging', () => {
 })
 
 describe('staleness', () => {
-	test('stale only when connected and quiet for more than 5s', () => {
+	test('stale only when connected and quiet for more than 7.5s', () => {
 		let now = 0
 		const state = new ModuleState(() => now)
 		assert.equal(state.isStale, false)
 		state.setSocketConnected(true)
-		now = 5000
+		now = 7500
 		assert.equal(state.isStale, false)
-		now = 5001
+		now = 7501
 		assert.equal(state.isStale, true)
 		state.markFrame()
 		assert.equal(state.isStale, false)
@@ -289,8 +299,8 @@ describe('preset config gating', () => {
 	})
 
 	test('countdown stages go amber at 60s then red at 30s', () => {
-		const stages = getPresetDefinitions(new ModuleState()).countdown_stages.feedbacks
-			.filter((f) => f.feedbackId === 'timerUnderThreshold')
+		const stages = getPresetDefinitions(new ModuleState())
+			.countdown_stages.feedbacks.filter((f) => f.feedbackId === 'timerUnderThreshold')
 			.map((f) => f.options.thresholdSeconds)
 		assert.deepEqual(stages, [60, 30])
 	})
@@ -299,7 +309,13 @@ describe('preset config gating', () => {
 		const presets = getPresetDefinitions(new ModuleState())
 		assert.equal(Object.values(presets).filter((p) => p.category === 'Timer Entry').length, 20)
 		assert.equal(Object.keys(presets).filter((id) => id.startsWith('rundown_row_')).length, 8)
-		for (const id of ['timer_plus_10', 'timer_minus_10', 'plan_next_hold', 'waypoint_next', 'status_connection_stale']) {
+		for (const id of [
+			'timer_plus_10',
+			'timer_minus_10',
+			'plan_next_hold',
+			'waypoint_next',
+			'status_connection_stale',
+		]) {
 			assert.ok(presets[id], id)
 		}
 		assert.deepEqual(presets.plan_next_hold.steps[0].down[0].options, { startTimer: false })

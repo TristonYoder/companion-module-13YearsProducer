@@ -25,7 +25,7 @@ export function getConfigFields(): SomeCompanionConfigField[] {
 			id: 'host',
 			label: 'Producer Host / IP',
 			tooltip:
-				"The Mac or iPad's LAN address, shown in the app under Settings → Control API. Bonjour discovery exists (_13years-api._tcp) but macOS often refuses the registration, so this module always dials host:port directly.",
+				"The Mac or iPad's LAN address, shown in the app under Settings → Control API. The app also advertises the API over Bonjour (service _13years._tcp, TXT keys ip and apiport), but this module always dials host:port directly. Use just the address: no http://, path or port.",
 			width: 8,
 			default: '',
 		},

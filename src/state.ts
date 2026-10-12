@@ -1,4 +1,4 @@
-import { ClockSync, anchorElapsedMs, anchorElapsedSeconds, anchorRemainingSeconds } from './sync.js'
+import { ClockSync, anchorElapsedMs, anchorElapsedSeconds, anchorRemainingSeconds, monotonicEpochNow } from './sync.js'
 import { formatDuration, parseTimerInput, previewText, signOf, withSign } from './timerEntry.js'
 import type { TimerEntrySign, TimerInputAction } from './timerEntry.js'
 import type {
@@ -25,11 +25,57 @@ const DEFAULT_HOUR_FORMAT_THRESHOLD = 'over90Minutes'
 /** Rows on the Rundown preset grid. */
 export const RUNDOWN_ROWS = 8
 
-/** A socket that has delivered nothing (not even a pong) for longer than this, while "connected", is stale. */
-export const STALE_AFTER_MS = 5000
+/** A socket that has delivered no data frame for longer than this, while "connected", is stale. Pongs do not count: they only prove the socket is open, not that the app is telling us anything. */
+export const STALE_AFTER_MS = 7500
 
-/** Sync protocol v2 sockets get a digest every 10 s and push nothing else while idle, so quiet is normal for much longer. */
-export const STALE_AFTER_MS_V2 = 25000
+/** Sync protocol v2 sockets get a digest every 10 s and push nothing else while idle, so quiet is normal for longer. */
+export const STALE_AFTER_MS_V2 = 15000
+
+/** How long `last_action_error` / the `actionFailed` feedback hold after a failed press. */
+export const ACTION_ERROR_HOLD_MS = 10000
+
+/** Role-indexed variables (`role_1_name` ...) stop here. */
+export const MAX_INDEXED_ROLES = 16
+
+/** A larger `rev` jump than this, without a new epoch, is a corrupt packet rather than progress. */
+export const MAX_REV_JUMP = 1_000_000
+
+/** Anchor bounds (PROTOCOL-V2.md, v2.1). */
+export const ANCHOR_MAX_LENGTH_SECONDS = 604_800
+export const ANCHOR_MAX_ELAPSED_MS = 604_800_000
+
+/** `m:ss`, minutes unpadded and not rolled into hours ("1:12", "75:00"). */
+export function formatMinutesSeconds(totalSeconds: number): string {
+	const seconds = Math.max(0, Math.floor(totalSeconds))
+	return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
+}
+
+/** `false` for an anchor whose numbers are outside the protocol's ranges; such an anchor is ignored. */
+export function isAnchorInBounds(anchor: TimerAnchor): boolean {
+	return (
+		Number.isFinite(anchor.lengthInSeconds) &&
+		Number.isFinite(anchor.elapsedMs) &&
+		Number.isFinite(anchor.anchorMs) &&
+		anchor.lengthInSeconds >= 0 &&
+		anchor.lengthInSeconds <= ANCHOR_MAX_LENGTH_SECONDS &&
+		anchor.elapsedMs >= 0 &&
+		anchor.elapsedMs <= ANCHOR_MAX_ELAPSED_MS
+	)
+}
+
+/** A timer without an out-of-range anchor (the pushed values still describe it); everything else untouched. */
+function withSaneAnchor(timer: ActiveTimer | null | undefined): ActiveTimer | null {
+	if (!timer) return null
+	if (!timer.anchor || isAnchorInBounds(timer.anchor)) return timer
+	return { ...timer, anchor: null }
+}
+
+export interface ApplyOptions {
+	/** A `hello` or priming read: the rev gate is dropped first, and a new epoch needs no follow-up fetch. */
+	hello?: boolean
+	/** A catch-up read (digest mismatch, epoch change): rebases the rev gate like a PONG, so an equal rev is taken, though never an older one. */
+	catchUp?: boolean
+}
 
 /** Turns a role name into a variable/preset-id-safe slug (lowercase, underscores). */
 export function slugify(text: string): string {
@@ -78,6 +124,18 @@ export class ModuleState {
 	timerEntryBuffer = ''
 	/** Highest `rev` seen; `null` until the app sends one (older apps never do). */
 	rev: number | null = null
+	/** The app's launch `epoch` (sync protocol v2.1); `null` until one arrives. */
+	epoch: number | null = null
+	/**
+	 * Called when a packet carries a different `epoch` than the one held (the
+	 * app restarted), after the anchor, rev gate and clock samples were dropped.
+	 * `needsState` is true when the packet was not itself a full snapshot.
+	 */
+	onEpochChange?: (needsState: boolean) => void
+	/** The last failed action's message and when it failed (this state's clock). */
+	private actionError: { message: string; at: number } | null = null
+	/** When each rate-limited action last went through. */
+	private lastPressAt = new Map<string, number>()
 	/** App clock minus this machine's clock, from the last stamped snapshot. */
 	serverOffsetMs = 0
 	lastFrameAt: number | null = null
@@ -88,7 +146,7 @@ export class ModuleState {
 	protoVersion: 1 | 2 = 1
 	readonly sync: ClockSync
 
-	constructor(readonly clock: () => number = Date.now) {
+	constructor(readonly clock: () => number = monotonicEpochNow) {
 		this.sync = new ClockSync(clock)
 	}
 
@@ -103,27 +161,81 @@ export class ModuleState {
 		this.rev = null
 	}
 
-	private acceptRev(rev: number | undefined, serverNowMs: number | undefined): boolean {
+	/** Back to the just-constructed state, for a new host or a torn-down connection. The Timer Entry buffer is the operator's, not the app's, and stays. */
+	reset(): void {
+		this.snapshot = null
+		this.isSocketConnected = false
+		this.lastMessage = null
+		this.rev = null
+		this.epoch = null
+		this.serverOffsetMs = 0
+		this.lastFrameAt = null
+		this.rundownPage = 0
+		this.protoVersion = 1
+		this.sync.reset()
+	}
+
+	/**
+	 * Notes the app's `epoch`. The first one is just remembered; a different
+	 * one means the app restarted, so the held anchor, rev gate and clock
+	 * samples describe a process that no longer exists and are dropped. Returns
+	 * whether it changed. `needsState` tells the listener whether the packet
+	 * that brought the news carries a full snapshot itself.
+	 */
+	observeEpoch(epoch: number | undefined | null, needsState = true): boolean {
+		if (typeof epoch !== 'number') return false
+		const previous = this.epoch
+		this.epoch = epoch
+		if (previous === null || previous === epoch) return false
+		this.rev = null
+		this.sync.reset()
+		if (this.snapshot?.timer?.anchor) {
+			this.snapshot = { ...this.snapshot, timer: { ...this.snapshot.timer, anchor: null } }
+		}
+		this.onEpochChange?.(needsState)
+		return true
+	}
+
+	/**
+	 * The gate: a packet is taken only when its `rev` is strictly greater than
+	 * the one held (`catchUp` also takes an equal one), and only when it does
+	 * not leap past it by more than `MAX_REV_JUMP` — unless the epoch changed or
+	 * this is a hello/catch-up, which rebase it. A packet without a `rev` is
+	 * always taken.
+	 */
+	private acceptRev(
+		rev: number | undefined,
+		serverNowMs: number | undefined,
+		epochChanged: boolean,
+		options: ApplyOptions,
+	): boolean {
 		if (typeof rev === 'number') {
-			if (this.rev !== null && rev < this.rev) return false
+			const held = this.rev
+			if (held !== null && !options.hello && !epochChanged) {
+				if (options.catchUp ? rev < held : rev <= held) return false
+				if (!options.catchUp && rev - held > MAX_REV_JUMP) return false
+			}
 			this.rev = rev
 		}
 		if (typeof serverNowMs === 'number') this.serverOffsetMs = serverNowMs - this.clock()
 		return true
 	}
 
-	/** Returns `false` (and keeps the held snapshot) when `state` is older than what's held. A snapshot without a `rev` is always accepted. */
-	applyState(state: ControlAPIState): boolean {
-		if (!this.acceptRev(state.rev, state.serverNowMs)) return false
-		this.snapshot = state
+	/** Returns `false` (and keeps the held snapshot) when `state` is not newer than what's held. A snapshot without a `rev` is always accepted. */
+	applyState(state: ControlAPIState, options: ApplyOptions = {}): boolean {
+		const epochChanged = this.observeEpoch(state.epoch, false)
+		if (options.hello) this.rev = null
+		if (!this.acceptRev(state.rev, state.serverNowMs, epochChanged, options)) return false
+		this.snapshot = state.timer?.anchor ? { ...state, timer: withSaneAnchor(state.timer) } : state
 		return true
 	}
 
-	/** Merges the slim `timer` event into the held snapshot. Ignored when older, or when there's no snapshot yet to merge into. */
+	/** Merges the slim `timer` event into the held snapshot. Ignored when not newer, or when there's no snapshot yet to merge into. */
 	applyTimer(event: TimerSnapshot): boolean {
+		const epochChanged = this.observeEpoch(event.epoch, true)
 		if (!this.snapshot) return false
-		if (!this.acceptRev(event.rev, event.serverNowMs)) return false
-		this.snapshot = { ...this.snapshot, timer: event.timer }
+		if (!this.acceptRev(event.rev, event.serverNowMs, epochChanged, {})) return false
+		this.snapshot = { ...this.snapshot, timer: withSaneAnchor(event.timer) }
 		return true
 	}
 
@@ -168,6 +280,41 @@ export class ModuleState {
 		this.isSocketConnected = connected
 		if (!connected) this.lastFrameAt = null
 		else if (this.lastFrameAt === null) this.lastFrameAt = this.clock()
+	}
+
+	// MARK: - Action feedback
+
+	/** Remembers a failed press; `currentActionError` shows it for `ACTION_ERROR_HOLD_MS`. */
+	noteActionError(message: string): void {
+		this.actionError = { message, at: this.clock() }
+	}
+
+	/** The last failed action's message, or '' once it is older than `ACTION_ERROR_HOLD_MS`. */
+	get currentActionError(): string {
+		const error = this.actionError
+		if (!error) return ''
+		if (this.clock() - error.at > ACTION_ERROR_HOLD_MS) {
+			this.actionError = null
+			return ''
+		}
+		return error.message
+	}
+
+	get actionFailed(): boolean {
+		return this.currentActionError !== ''
+	}
+
+	/**
+	 * Rate limit for a rapid-fire action: `true` (ignore this press) when the
+	 * previous accepted press of `key` was less than `windowMs` ago. A window of
+	 * 0 never ignores. An ignored press does not restart the window.
+	 */
+	shouldIgnoreRepeat(key: string, windowMs: number): boolean {
+		const now = this.clock()
+		const last = this.lastPressAt.get(key)
+		if (windowMs > 0 && last !== undefined && now - last < windowMs) return true
+		this.lastPressAt.set(key, now)
+		return false
 	}
 
 	get roles(): RoleCue[] {
@@ -218,6 +365,61 @@ export class ModuleState {
 		if (!timer) return ''
 		const remaining = this.timerRemainingSeconds
 		return this.timerAnchor && remaining !== null ? this.formatSeconds(remaining) : timer.formattedRemaining
+	}
+
+	/** Length of the live item in whole seconds (the anchor's on v2, the item's otherwise); 0 without a live timer. */
+	get timerLengthSeconds(): number {
+		const timer = this.timer
+		if (!timer) return 0
+		return this.timerAnchor?.lengthInSeconds ?? timer.item?.lengthInSeconds ?? 0
+	}
+
+	/** `m:ss` elapsed on the live item. */
+	get activeItemElapsedText(): string {
+		return this.timer ? formatMinutesSeconds(this.timerElapsedSeconds) : ''
+	}
+
+	/** `m:ss` length of the live item. */
+	get activeItemLengthText(): string {
+		return this.timer ? formatMinutesSeconds(this.timerLengthSeconds) : ''
+	}
+
+	/** `+m:ss` while the live item is over its time, else ''. */
+	get activeItemOvertimeText(): string {
+		if (!this.timerIsOvertime) return ''
+		const remaining = this.timerRemainingSeconds
+		return remaining === null ? '' : `+${formatMinutesSeconds(-remaining)}`
+	}
+
+	/** Epoch ms (app clock) the running live item reaches zero, or `null` when nothing is counting or it is already over. */
+	get itemEndsAtMs(): number | null {
+		const timer = this.timer
+		if (!timer) return null
+		const anchor = this.timerAnchor
+		if (anchor) {
+			if (!anchor.isRunning) return null
+			const end = anchor.anchorMs + (anchor.lengthInSeconds * 1000 - anchor.elapsedMs)
+			return end > this.nowMs ? end : null
+		}
+		const remaining = this.timerRemainingSeconds
+		if (!timer.isRunning || remaining === null || remaining <= 0) return null
+		return this.nowMs + remaining * 1000
+	}
+
+	/** Local `HH:MM:SS` the running live item ends at, or ''. */
+	get itemEndsAtText(): string {
+		const end = this.itemEndsAtMs
+		if (end === null) return ''
+		const date = new Date(end)
+		const pad = (n: number) => String(n).padStart(2, '0')
+		return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+	}
+
+	/** `v2 ±<rtt/2> ms` once clock sync has a sample, `v2` before that, `legacy` on an app without sync protocol v2. */
+	get syncQualityText(): string {
+		if (this.protoVersion !== 2) return 'legacy'
+		const rtt = this.sync.rttMs
+		return rtt === null ? 'v2' : `v2 ±${Math.round(rtt / 2)} ms`
 	}
 
 	get plan(): PlanStatus | null {
@@ -477,6 +679,15 @@ export class ModuleState {
 			(this.plan?.items ?? []).map((i) => [i.id, i.title, i.lengthInSeconds]),
 			this.waypoints.map((w) => [w.id, w.slug, w.name]),
 			this.scheduleEntries.map((e) => [e.id, e.title]),
+			[
+				this.pco?.selectedServiceTypeId ?? null,
+				this.pco?.defaultServiceTypeId ?? null,
+				(this.pco?.serviceTypes ?? []).map((t) => [t.id, t.name]),
+				(this.pco?.plans ?? []).map((p) => [p.id, p.title]),
+				this.plan?.title ?? null,
+				this.plan?.pcoServiceTypeId ?? null,
+				this.plan?.pcoPlanId ?? null,
+			],
 		])
 	}
 }

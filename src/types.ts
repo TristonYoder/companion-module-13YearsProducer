@@ -325,12 +325,15 @@ export interface ControlAPIState {
 	rev?: number
 	/** The app's wall clock (epoch ms) when this snapshot was taken — absent from older app versions. */
 	serverNowMs?: number
+	/** Random id the app picks at launch (sync protocol v2.1). A different value means the app restarted. Absent from v2.0 and older apps. */
+	epoch?: number
 }
 
 /** Slim payload of the `timer` event and `GET /v1/timer`: the timer alone, with the same revision stamp as a full snapshot. */
 export interface TimerSnapshot {
 	rev?: number
 	serverNowMs?: number
+	epoch?: number
 	timer: ActiveTimer | null
 }
 
@@ -385,6 +388,7 @@ export interface DigestHashes {
 export interface DigestData {
 	rev?: number
 	serverNowMs?: number
+	epoch?: number
 	hashes: DigestHashes
 }
 

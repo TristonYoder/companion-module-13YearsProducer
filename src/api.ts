@@ -1,4 +1,5 @@
 import WebSocket from 'ws'
+import { describeConnectionError } from './connection.js'
 import type {
 	ActiveTimer,
 	CommandReply,
@@ -97,7 +98,7 @@ export class ControlApi {
 		} catch (err) {
 			throw new ApiError(
 				0,
-				`${init?.method ?? 'GET'} ${path} failed: ${err instanceof Error ? err.message : String(err)}`,
+				`${init?.method ?? 'GET'} ${path} failed: ${describeConnectionError(err) ?? (err instanceof Error ? err.message : String(err))}`,
 			)
 		}
 
@@ -531,14 +532,19 @@ export interface ControlSocketHandlers {
 	onTimer?: (timer: TimerSnapshot) => void
 	/** Sync protocol v2: the periodic section hashes (also a heartbeat). */
 	onDigest?: (digest: DigestData) => void
-	/** Any inbound traffic at all, pongs included — proof the link is alive. */
+	/** Any inbound data frame (an event or a command reply) — what staleness counts. Pongs are not data frames. */
 	onFrame?: () => void
 	onOpen?: () => void
+	/** `reason` is `'closed'`, or what the failed attempt meant (`describeConnectionError`) when an error preceded the close. */
 	onClose?: (reason: string) => void
 	onError?: (err: Error) => void
 }
 
 const RECONNECT_DELAY_MS = 3000
+/** A TCP connect that is accepted but never completes the upgrade (a firewall, a wrong service) fails after this instead of hanging. */
+export const HANDSHAKE_TIMEOUT_MS = 5000
+/** A socket command with no reply by now is dropped from `pending`. */
+export const SOCKET_COMMAND_TIMEOUT_MS = 5000
 const PING_INTERVAL_MS = 5000
 /** No frame or pong for this long and the socket is treated as half-open (e.g. the Mac slept) and torn down. */
 const PONG_DEADLINE_MS = 12000
@@ -569,7 +575,13 @@ export class ControlSocket {
 	constructor(
 		private getConfig: () => ResolvedApiConfig,
 		private handlers: ControlSocketHandlers,
+		private options: { handshakeTimeoutMs?: number; commandTimeoutMs?: number } = {},
 	) {}
+
+	/** Commands waiting for a reply (exposed for tests). */
+	get pendingCount(): number {
+		return this.pending.size
+	}
 
 	get isOpen(): boolean {
 		return this.ws?.readyState === WebSocket.OPEN
@@ -594,8 +606,7 @@ export class ControlSocket {
 		this.stopKeepalive()
 		this.ws?.close()
 		this.ws = undefined
-		for (const { reject } of this.pending.values()) reject(new Error('Socket closed'))
-		this.pending.clear()
+		this.rejectPending('Socket closed')
 	}
 
 	/** Send a command over the socket instead of REST (`op` is the dotted route form, e.g. `plan.next`). Not used by this module's actions — REST is simpler to reason about and to test — but the sync protocol's `proto` and `sync` ops go through it. */
@@ -605,17 +616,43 @@ export class ControlSocket {
 		}
 		const id = String(this.nextCommandId++)
 		const envelope = { id, op, body }
+		const timeoutMs = this.options.commandTimeoutMs ?? SOCKET_COMMAND_TIMEOUT_MS
 		return new Promise<CommandReply>((resolve, reject) => {
-			this.pending.set(id, { resolve, reject })
-			this.ws?.send(JSON.stringify(envelope))
+			const timer = setTimeout(() => {
+				this.pending.delete(id)
+				reject(new Error(`${op} timed out`))
+			}, timeoutMs)
+			this.pending.set(id, {
+				resolve: (reply) => {
+					clearTimeout(timer)
+					resolve(reply)
+				},
+				reject: (err) => {
+					clearTimeout(timer)
+					reject(err)
+				},
+			})
+			this.ws?.send(JSON.stringify(envelope), (err) => {
+				if (!err) return
+				clearTimeout(timer)
+				this.pending.delete(id)
+				reject(err)
+			})
 		})
+	}
+
+	private rejectPending(reason: string): void {
+		const waiting = [...this.pending.values()]
+		this.pending.clear()
+		for (const { reject } of waiting) reject(new Error(reason))
 	}
 
 	private openSocket(): void {
 		const { host, port } = this.getConfig()
 		const url = `ws://${host}:${port}/v1/socket`
-		const ws = new WebSocket(url)
+		const ws = new WebSocket(url, { handshakeTimeout: this.options.handshakeTimeoutMs ?? HANDSHAKE_TIMEOUT_MS })
 		this.ws = ws
+		let failure: string | null = null
 
 		ws.on('open', () => {
 			this.pongDeadlineMs = PONG_DEADLINE_MS
@@ -624,29 +661,34 @@ export class ControlSocket {
 		})
 
 		ws.on('message', (data: WebSocket.RawData) => {
-			this.noteInbound()
+			this.noteInbound(true)
 			this.handleMessage(rawDataToString(data))
 		})
 
+		// A pong proves the socket is open, which keeps the half-open deadline
+		// at bay, but it isn't the app saying anything: it must not reset the
+		// module's "no data lately" staleness.
 		ws.on('pong', () => {
-			this.noteInbound()
+			this.noteInbound(false)
 		})
 
 		ws.on('close', () => {
 			if (this.ws !== ws) return
 			this.stopKeepalive()
-			this.handlers.onClose?.('closed')
+			this.rejectPending('Socket closed')
+			this.handlers.onClose?.(failure ?? 'closed')
 			this.scheduleReconnect()
 		})
 
 		ws.on('error', (err: Error) => {
+			failure = describeConnectionError(err) ?? failure
 			this.handlers.onError?.(err)
 		})
 	}
 
-	private noteInbound(): void {
+	private noteInbound(dataFrame: boolean): void {
 		this.lastInboundAt = Date.now()
-		this.handlers.onFrame?.()
+		if (dataFrame) this.handlers.onFrame?.()
 	}
 
 	private startKeepalive(ws: WebSocket): void {

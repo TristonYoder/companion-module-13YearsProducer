@@ -7,6 +7,8 @@ import {
 } from '@companion-module/base'
 import { ApiError, ControlApi, ControlSocket } from './api.js'
 import { getConfigFields, type ModuleConfig } from './config.js'
+import { connectionChanged, describeConnectionError, resolveConnection } from './connection.js'
+import { upgradeScripts } from './upgrades.js'
 import { getActionDefinitions, type ActionDeps } from './actions.js'
 import { getFeedbackDefinitions } from './feedbacks.js'
 import { getVariableDefinitions, getVariableValues } from './variables.js'
@@ -32,6 +34,7 @@ class ThirteenYearsProducerInstance extends InstanceBase<ModuleConfig> {
 	private definitionSignature = ''
 	private staleTimer: ReturnType<typeof setInterval> | undefined
 	private wasStale = false
+	private lastActionError = ''
 
 	async init(config: ModuleConfig, _isFirstInit: boolean): Promise<void> {
 		this.config = config
@@ -57,10 +60,14 @@ class ThirteenYearsProducerInstance extends InstanceBase<ModuleConfig> {
 				this.state.applyMessage(message)
 				this.pushDerivedState()
 			},
-			onClose: () => {
+			onClose: (reason) => {
 				this.session.stop()
 				this.state.setSocketConnected(false)
-				this.updateStatus(InstanceStatus.Disconnected, 'Control socket closed — reconnecting')
+				if (reason === 'closed') {
+					this.updateStatus(InstanceStatus.Disconnected, 'Control socket closed — reconnecting')
+				} else {
+					this.updateStatus(InstanceStatus.ConnectionFailure, `${reason} — retrying`)
+				}
 				this.pushDerivedState()
 			},
 			onError: (err) => {
@@ -72,7 +79,7 @@ class ThirteenYearsProducerInstance extends InstanceBase<ModuleConfig> {
 			state: this.state,
 			sendCommand: async (op, body) => this.socket.sendCommand(op, body),
 			fetchState: async () => this.api.getState(),
-			adopt: (snapshot) => this.applyReply(snapshot),
+			adopt: (snapshot) => this.applyReply(snapshot, true),
 			onChange: () => this.pushTimerState(),
 			onProtocol: (version) => this.socket.setProtocolV2(version === 2),
 			log: (level, message) => this.log(level, message),
@@ -92,13 +99,27 @@ class ThirteenYearsProducerInstance extends InstanceBase<ModuleConfig> {
 		this.socket?.close()
 	}
 
+	/** Only a different host or port is a different connection; other options (overtimeRed ...) just rebuild what they shape. */
 	async configUpdated(config: ModuleConfig): Promise<void> {
+		const reconnect = connectionChanged(this.config, config)
 		this.config = config
+		if (!reconnect) {
+			this.refreshDynamicDefinitions(true)
+			return
+		}
+		this.disconnect()
 		this.refreshDynamicDefinitions(true)
-		this.session.stop()
-		this.socket.close()
+		this.pushDerivedState()
 		this.updateStatus(InstanceStatus.Connecting)
 		await this.primeAndConnect()
+	}
+
+	/** Tears the link down and forgets everything the old one said, so no variable or feedback keeps describing a connection that is gone. */
+	private disconnect(): void {
+		this.session.stop()
+		this.socket.close()
+		this.state.reset()
+		this.wasStale = false
 	}
 
 	getConfigFields(): SomeCompanionConfigField[] {
@@ -106,7 +127,8 @@ class ThirteenYearsProducerInstance extends InstanceBase<ModuleConfig> {
 	}
 
 	private resolvedConfig(): { host: string; port: number } {
-		return { host: this.config.host, port: this.config.port }
+		const connection = resolveConnection(this.config)
+		return connection.ok ? { host: connection.host, port: connection.port } : { host: '', port: 0 }
 	}
 
 	/** `refresh` is what the Timer Entry keypad actions call: its buffer lives in `ModuleState`, so nothing on the app's side will push the change back for us. */
@@ -115,15 +137,21 @@ class ThirteenYearsProducerInstance extends InstanceBase<ModuleConfig> {
 			api: this.api,
 			state: this.state,
 			log: (level, message) => this.log(level, message),
-			refresh: () => this.pushDerivedState(),
+			refresh: () => {
+				this.lastActionError = this.state.currentActionError
+				this.pushDerivedState()
+			},
 		}
 	}
 
-	/** Only the stale/fresh transition needs announcing; a quiet link costs nothing per tick. */
+	/** Once a second: wake/clock-step detection for clock sync, then only transitions (stale/fresh, an action error appearing or expiring) are announced; a quiet link costs nothing per tick. */
 	private checkStale(): void {
+		this.session.checkWake(Date.now())
 		const stale = this.state.isStale
-		if (stale === this.wasStale) return
+		const actionError = this.state.currentActionError
+		if (stale === this.wasStale && actionError === this.lastActionError) return
 		this.wasStale = stale
+		this.lastActionError = actionError
 		this.pushDerivedState()
 	}
 
@@ -164,8 +192,12 @@ class ThirteenYearsProducerInstance extends InstanceBase<ModuleConfig> {
 	 * reacting to a push — everything after this call is push-driven.
 	 */
 	private async primeAndConnect(): Promise<void> {
-		if (!this.config.host) {
-			this.updateStatus(InstanceStatus.BadConfig, 'Set the Producer host/IP in the connection settings')
+		const connection = resolveConnection(this.config)
+		if (!connection.ok) {
+			this.disconnect()
+			this.refreshDynamicDefinitions(true)
+			this.pushDerivedState()
+			this.updateStatus(InstanceStatus.BadConfig, connection.reason)
 			return
 		}
 
@@ -174,7 +206,7 @@ class ThirteenYearsProducerInstance extends InstanceBase<ModuleConfig> {
 			this.handleSnapshot(snapshot, true)
 		} catch (err) {
 			this.log('warn', `Initial GET /v1/state failed (will retry via the socket): ${errMessage(err)}`)
-			this.updateStatus(InstanceStatus.Connecting, 'Waiting for the control socket…')
+			this.updateStatus(InstanceStatus.Connecting, describeConnectionError(err) ?? 'Waiting for the control socket…')
 		}
 
 		this.socket.connect()
@@ -182,10 +214,9 @@ class ThirteenYearsProducerInstance extends InstanceBase<ModuleConfig> {
 
 	/** `authoritative` (hello, or the priming read) drops the revision guard first: a restarted app counts from the start again. */
 	private handleSnapshot(snapshot: ControlAPIState, authoritative = false): void {
-		if (authoritative) this.state.resetRev()
 		this.state.setSocketConnected(true)
 		this.state.markFrame()
-		if (!this.state.applyState(snapshot)) return
+		if (!this.state.applyState(snapshot, { hello: authoritative })) return
 		this.updateStatus(InstanceStatus.Ok)
 		this.refreshDynamicDefinitions()
 		this.session.scheduleTick()
@@ -193,8 +224,8 @@ class ThirteenYearsProducerInstance extends InstanceBase<ModuleConfig> {
 	}
 
 	/** A command's own reply is already the new state — apply it now rather than waiting for the socket to echo it, unless the socket got there first with something newer. */
-	private applyReply(snapshot: ControlAPIState): void {
-		if (!this.state.applyState(snapshot)) return
+	private applyReply(snapshot: ControlAPIState, catchUp = false): void {
+		if (!this.state.applyState(snapshot, { catchUp })) return
 		this.refreshDynamicDefinitions()
 		this.session.scheduleTick()
 		this.pushDerivedState()
@@ -223,4 +254,4 @@ export function errMessage(err: unknown): string {
 	return err instanceof Error ? err.message : String(err)
 }
 
-runEntrypoint(ThirteenYearsProducerInstance, [])
+runEntrypoint(ThirteenYearsProducerInstance, upgradeScripts)

@@ -86,7 +86,26 @@ describe('FNV-1a 64 (spec test vectors)', () => {
 		assert.equal(fnv1a64(canonicalTimer(null)), '3c0d17bad169557b')
 		assert.equal(fnv1a64(canonicalTimer(undefined)), '3c0d17bad169557b')
 
-		assert.equal(fnv1a64(canonicalMessages({ messages: [{ id: 'm2' }, { id: 'm1' }] })), 'dddb4a3dc4d94432')
+		assert.equal(
+			fnv1a64(
+				canonicalMessages({
+					messages: [
+						{ id: 'm1', timestamp: '2026-01-01T10:00:00Z' },
+						{ id: 'm2', timestamp: '2026-01-01T10:00:05Z' },
+					],
+				}),
+			),
+			'dddb4a3dc4d94432',
+		)
+		// Equal timestamps: id ascending, whichever order they were held in.
+		for (const ids of [
+			['a', 'b'],
+			['b', 'a'],
+		]) {
+			const messages = ids.map((id) => ({ id, timestamp: '2026-01-01T10:00:00Z' }))
+			assert.equal(canonicalMessages({ messages }), `a${RS}b`)
+			assert.equal(fnv1a64(canonicalMessages({ messages })), 'e5e7b9190438f91c')
+		}
 
 		const plan = {
 			items: [
@@ -149,11 +168,11 @@ describe('clock offset estimation', () => {
 	test('keeps only the last 8 samples', () => {
 		const sync = new ClockSync(() => 0)
 		sync.addSample(0, 50, 50, 1) // rtt 1, offset 49.5 — the best, until it ages out
-		for (let i = 0; i < SYNC_SAMPLE_COUNT - 1; i++) sync.addSample(0, 1000, 1000, 100)
+		for (let i = 0; i < SYNC_SAMPLE_COUNT - 1; i++) sync.addSample(0, 50, 50, 100) // rtt 100, offset 0
 		assert.equal(sync.rttMs, 1)
-		sync.addSample(0, 1000, 1000, 100)
+		sync.addSample(0, 50, 50, 100)
 		assert.equal(sync.rttMs, 100)
-		assert.equal(sync.offsetMs, 950)
+		assert.equal(sync.offsetMs, 0)
 	})
 
 	test('producerNowMs adds the offset to the local clock; reset forgets it', () => {
@@ -327,19 +346,21 @@ describe('v2 vs legacy accessors', () => {
 		assert.equal(state.timerEntryPreview, '+00:30\n= 08:50')
 	})
 
-	test('stale threshold is 5 s legacy, 25 s on v2', () => {
+	test('stale threshold is 7.5 s legacy, 15 s on v2', () => {
 		let now = 0
 		const state = new ModuleState(() => now)
 		state.setSocketConnected(true)
 		assert.equal(state.staleAfterMs, STALE_AFTER_MS)
-		now = 6000
+		now = 7500
+		assert.equal(state.isStale, false)
+		now = 7501
 		assert.equal(state.isStale, true)
 		state.setProtoVersion(2)
 		assert.equal(state.staleAfterMs, STALE_AFTER_MS_V2)
 		assert.equal(state.isStale, false)
-		now = 25000
+		now = 15000
 		assert.equal(state.isStale, false)
-		now = 25001
+		now = 15001
 		assert.equal(state.isStale, true)
 		state.markFrame()
 		assert.equal(state.isStale, false)
