@@ -1,6 +1,3 @@
-// Pure unit tests — no running Producer app required, unlike contract/.
-//
-//   npm run test:unit
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 
@@ -35,7 +32,15 @@ function snapshot(overrides = {}) {
 		roles: [],
 		selectedRoleIds: [],
 		timer: null,
-		plan: { title: null, items: [], activeItemIndex: 0, isAtEndOfPlan: false, canLoadNextService: false, pcoServiceTypeId: null, pcoPlanId: null },
+		plan: {
+			title: null,
+			items: [],
+			activeItemIndex: 0,
+			isAtEndOfPlan: false,
+			canLoadNextService: false,
+			pcoServiceTypeId: null,
+			pcoPlanId: null,
+		},
 		messages: [],
 		pco: {
 			isConnected: false,
@@ -119,19 +124,79 @@ describe('ModuleState', () => {
 	test('nextPlanItem returns the item after the active index, or undefined at the end', () => {
 		const state = new ModuleState()
 		const items = [
-			{ id: 'a', title: 'Welcome', itemType: 'Item', sequence: 1, lengthInSeconds: 60, elapsedSeconds: 0, isRunning: false, servicePlanTitle: null, notes: {}, noteIds: {}, pcoServiceTypeId: null, pcoPlanId: null, isDurationActual: false },
-			{ id: 'b', title: 'Worship', itemType: 'Song', sequence: 2, lengthInSeconds: 240, elapsedSeconds: 0, isRunning: false, servicePlanTitle: null, notes: {}, noteIds: {}, pcoServiceTypeId: null, pcoPlanId: null, isDurationActual: false },
+			{
+				id: 'a',
+				title: 'Welcome',
+				itemType: 'Item',
+				sequence: 1,
+				lengthInSeconds: 60,
+				elapsedSeconds: 0,
+				isRunning: false,
+				servicePlanTitle: null,
+				notes: {},
+				noteIds: {},
+				pcoServiceTypeId: null,
+				pcoPlanId: null,
+				isDurationActual: false,
+			},
+			{
+				id: 'b',
+				title: 'Worship',
+				itemType: 'Song',
+				sequence: 2,
+				lengthInSeconds: 240,
+				elapsedSeconds: 0,
+				isRunning: false,
+				servicePlanTitle: null,
+				notes: {},
+				noteIds: {},
+				pcoServiceTypeId: null,
+				pcoPlanId: null,
+				isDurationActual: false,
+			},
 		]
-		state.applyState(snapshot({ plan: { title: 'Sunday', items, activeItemIndex: 0, isAtEndOfPlan: false, canLoadNextService: false, pcoServiceTypeId: null, pcoPlanId: null } }))
+		state.applyState(
+			snapshot({
+				plan: {
+					title: 'Sunday',
+					items,
+					activeItemIndex: 0,
+					isAtEndOfPlan: false,
+					canLoadNextService: false,
+					pcoServiceTypeId: null,
+					pcoPlanId: null,
+				},
+			}),
+		)
 		assert.equal(state.nextPlanItem().id, 'b')
 
-		state.applyState(snapshot({ plan: { title: 'Sunday', items, activeItemIndex: 1, isAtEndOfPlan: true, canLoadNextService: false, pcoServiceTypeId: null, pcoPlanId: null } }))
+		state.applyState(
+			snapshot({
+				plan: {
+					title: 'Sunday',
+					items,
+					activeItemIndex: 1,
+					isAtEndOfPlan: true,
+					canLoadNextService: false,
+					pcoServiceTypeId: null,
+					pcoPlanId: null,
+				},
+			}),
+		)
 		assert.equal(state.nextPlanItem(), undefined)
 	})
 
 	test('applyMessage records the latest message independently of state snapshots', () => {
 		const state = new ModuleState()
-		const message = { id: 'm1', sender: 'Producer', targetRoleId: null, senderRoleId: null, text: '30 seconds', timestamp: '2024-01-15T10:30:45Z', isHighPriority: true }
+		const message = {
+			id: 'm1',
+			sender: 'Producer',
+			targetRoleId: null,
+			senderRoleId: null,
+			text: '30 seconds',
+			timestamp: '2024-01-15T10:30:45Z',
+			isHighPriority: true,
+		}
 		state.applyMessage(message)
 		assert.equal(state.lastMessage.text, '30 seconds')
 	})
@@ -143,4 +208,26 @@ describe('ModuleState', () => {
 		state.setSocketConnected(false)
 		assert.equal(state.isSocketConnected, false)
 	})
+})
+
+test('applyMessage puts a new message at the front of the held thread once, so the messages hash matches the app', () => {
+	const state = new ModuleState()
+	state.applyState(snapshot({ messages: [{ id: 'm1', text: 'old', sender: 'Host', isHighPriority: false, timestamp: '2026-10-11T10:00:00Z' }] }))
+	const message = { id: 'm2', text: 'new', sender: 'Host', isHighPriority: false, timestamp: '2026-10-11T10:01:00Z' }
+	state.applyMessage(message)
+	state.applyMessage(message)
+	assert.deepEqual(state.snapshot.messages.map((m) => m.id), ['m2', 'm1'])
+})
+
+test('isAtStartOfPlan uses the app value, else skips header items like the app does', () => {
+	const state = new ModuleState()
+	assert.equal(state.isAtStartOfPlan, true)
+	const item = (id, itemType = 'item') => ({ id, title: id, itemType, lengthInSeconds: 60, elapsedSeconds: 0, isRunning: false })
+	const base = snapshot()
+	state.applyState({ ...base, plan: { ...base.plan, items: [item('h', 'header'), item('a'), item('b')], activeItemIndex: 1, isAtStartOfPlan: undefined } })
+	assert.equal(state.isAtStartOfPlan, true)
+	state.applyState({ ...base, plan: { ...base.plan, items: [item('h', 'header'), item('a'), item('b')], activeItemIndex: 2, isAtStartOfPlan: undefined } })
+	assert.equal(state.isAtStartOfPlan, false)
+	state.applyState({ ...base, plan: { ...base.plan, items: [item('a'), item('b')], activeItemIndex: 1, isAtStartOfPlan: true } })
+	assert.equal(state.isAtStartOfPlan, true)
 })

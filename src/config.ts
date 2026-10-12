@@ -1,11 +1,11 @@
 import type { SomeCompanionConfigField } from '@companion-module/base'
 
-/** Sits beside the app's LAN cue port (13380) and producer-assign port (13381) — see ControlAPIServer.swift. */
 export const DEFAULT_PORT = 13390
 
 export interface ModuleConfig {
 	host: string
 	port: number
+	overtimeRed?: boolean
 }
 
 export function getConfigFields(): SomeCompanionConfigField[] {
@@ -23,10 +23,9 @@ export function getConfigFields(): SomeCompanionConfigField[] {
 			id: 'host',
 			label: 'Producer Host / IP',
 			tooltip:
-				"The Mac or iPad's LAN address, shown in the app under Settings → Control API. Bonjour discovery exists (_13years-api._tcp) but macOS often refuses the registration, so this module always dials host:port directly.",
+				"The Mac or iPad's LAN address, shown in the app under Settings → Control API. The app also advertises the API over Bonjour (service _13years._tcp, TXT keys ip and apiport), but this module always dials host:port directly. Use just the address: no http://, path or port.",
 			width: 8,
 			default: '',
-			required: true,
 		},
 		{
 			type: 'number',
@@ -37,7 +36,15 @@ export function getConfigFields(): SomeCompanionConfigField[] {
 			default: DEFAULT_PORT,
 			min: 1,
 			max: 65535,
-			required: true,
+		},
+		{
+			type: 'checkbox',
+			id: 'overtimeRed',
+			label: 'Turn countdown buttons red in overtime',
+			tooltip:
+				'Applies to the countdown presets. Takes effect when the presets are rebuilt, which happens as soon as you save.',
+			width: 12,
+			default: true,
 		},
 	]
 }

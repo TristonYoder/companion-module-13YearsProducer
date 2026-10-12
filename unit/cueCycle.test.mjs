@@ -1,11 +1,7 @@
-// Pure unit tests for the Standby → Go! → Clear toggle cycle used by the
-// cycleRoleCue action and the per-role "Cues — Toggle" preset.
-//
-//   npm run test:unit
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 
-const { nextCueStateInCycle } = await import('../dist/types.js')
+const { nextCueStateInCycle, CUE_STATES } = await import('../dist/types.js')
 
 describe('nextCueStateInCycle', () => {
 	test('cycles Standby -> Go! -> Clear -> Standby', () => {
@@ -14,9 +10,10 @@ describe('nextCueStateInCycle', () => {
 		assert.equal(nextCueStateInCycle('OFF'), 'STANDBY')
 	})
 
-	test('a flashing role advances like its base state instead of getting stuck', () => {
-		assert.equal(nextCueStateInCycle('FLASH_STANDBY'), 'GO')
-		assert.equal(nextCueStateInCycle('FLASH_GO'), 'OFF')
+	test('the FLASH_* states the app deleted are gone from the cycle', () => {
+		assert.equal(nextCueStateInCycle('FLASH_STANDBY'), undefined)
+		assert.equal(nextCueStateInCycle('FLASH_GO'), undefined)
+		assert.deepEqual(CUE_STATES, ['OFF', 'STANDBY', 'GO'])
 	})
 
 	test('three presses in a row return to the starting state (the cycle is closed)', () => {

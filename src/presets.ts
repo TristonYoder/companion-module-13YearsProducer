@@ -1,9 +1,12 @@
-import { CompanionPresetDefinitions, combineRgb, type CompanionButtonStyleProps } from '@companion-module/base'
-import { CUE_STATE_COLOR, CUE_STATE_LABELS, CUE_STATE_TEXT_COLOR, FIRABLE_CUE_STATES } from './types'
-import { ModuleState } from './state'
-import { TIMER_ENTRY_GLYPHS, TIMER_ENTRY_GLYPHS_DARK } from './glyphs'
+import { combineRgb } from '@companion-module/base'
+import type { CompanionPresetDefinitions, CompanionButtonStyleProps } from '@companion-module/base'
 
-// Shared color palette
+type PresetFeedback = { feedbackId: string; options: Record<string, string | number>; style: Record<string, unknown> }
+import { CUE_STATE_COLOR, CUE_STATE_LABELS, CUE_STATE_TEXT_COLOR, FIRABLE_CUE_STATES } from './types.js'
+import { ModuleState, RUNDOWN_ROWS } from './state.js'
+import { TIMER_ENTRY_GLYPHS, TIMER_ENTRY_GLYPHS_DARK } from './glyphs.js'
+import { ICON_PLATES, ICONS } from './icons.js'
+
 const GREEN = combineRgb(38, 199, 89)
 const RED = combineRgb(204, 0, 0)
 const BLUE = combineRgb(74, 144, 226)
@@ -11,761 +14,739 @@ const GREY = combineRgb(100, 100, 100)
 const WHITE = combineRgb(255, 255, 255)
 const DARK = combineRgb(20, 26, 38)
 const AMBER = combineRgb(245, 184, 38)
-// CueState.swift's own near-black, for ink on a light ground.
+const PURPLE = combineRgb(126, 87, 194)
 const INK_DARK = combineRgb(26, 26, 26)
 
-/**
- * Whether the Timer Entry keys wear a pre-rendered Inter glyph (src/glyphs.ts)
- * rather than a label set in Companion's own bundled font. On, the pad's
- * digits match the app's screen, the web pager, and the ESP32 pagers —
- * slashed zero included. Set this to `false` to go back to plain text on every
- * key; the text each key would show is passed to `keyFace` either way, so
- * that's the whole revert.
- */
 const USE_GLYPH_KEY_FACES = true
 
-/**
- * A key's face. Companion draws a button's `png64` first and its `text` on top,
- * so a glyph key's label has to be empty or the default font prints straight
- * over the artwork. Falls back to text for any key the generated file has no
- * glyph for, so a partial re-render can't produce blank buttons.
- */
-function keyFace(glyphId: string, text: string): Pick<CompanionButtonStyleProps, 'text' | 'size' | 'png64'> {
-	const glyph = USE_GLYPH_KEY_FACES ? TIMER_ENTRY_GLYPHS[glyphId] : undefined
-	return glyph ? { text: '', size: '30', png64: glyph } : { text, size: '30' }
+function face(spec: {
+	icon?: string
+	glyph?: string
+	label?: string
+	color?: number
+	textColor?: number
+	plate?: boolean
+	size?: CompanionButtonStyleProps['size']
+}): CompanionButtonStyleProps {
+	const artwork = spec.glyph
+		? TIMER_ENTRY_GLYPHS[spec.glyph]
+		: spec.icon
+			? spec.plate === false
+				? ICONS[spec.icon]
+				: ICON_PLATES[spec.icon]
+			: undefined
+
+	return {
+		text: spec.label ?? '',
+		size: spec.size ?? '14',
+		color: spec.textColor ?? WHITE,
+		bgcolor: spec.color ?? DARK,
+		...(artwork ? { png64: artwork, pngalignment: 'center:center' as const } : {}),
+		alignment: 'center:bottom' as const,
+	}
 }
 
-/**
- * The style a feedback paints over a key while it's lit.
- *
- * A glyph is ink on transparency, so repainting the background underneath it
- * is exactly what makes a white key face vanish: Clear and Backspace go amber
- * the moment anything is typed, Enter goes green as soon as the buffer parses,
- * and white-on-amber is a blank button. Every lit state therefore swaps in the
- * dark-ink cut of the same glyph (`TIMER_ENTRY_GLYPHS_DARK`) rather than only
- * changing the colour behind it. The feedback *definitions* keep their own
- * defaults for anyone who adds one to a plain text button by hand; these are
- * the per-preset overrides.
- */
-function litFace(
-	glyphId: string,
-	text: string,
-	bgcolor: number,
-	ink: 'light' | 'dark',
-): { text: string; size: '30'; png64?: string; color: number; bgcolor: number } {
-	const map = ink === 'dark' ? TIMER_ENTRY_GLYPHS_DARK : TIMER_ENTRY_GLYPHS
-	const glyph = USE_GLYPH_KEY_FACES ? map[glyphId] : undefined
-	const color = ink === 'dark' ? INK_DARK : WHITE
-	return glyph ? { text: '', size: '30', png64: glyph, color, bgcolor } : { text, size: '30', color, bgcolor }
+function bg(color: number) {
+	return { bgcolor: color }
 }
 
-export function getPresetDefinitions(state: ModuleState): CompanionPresetDefinitions {
+export interface PresetOptions {
+	overtimeRed: boolean
+}
+
+function lit(color: number, glyph: string) {
+	return { bgcolor: color, color: INK_DARK, png64: TIMER_ENTRY_GLYPHS_DARK[glyph] }
+}
+
+function presetKey(id: string): string {
+	return id.replace(/[^A-Za-z0-9_-]/g, '_')
+}
+
+export function getPresetDefinitions(
+	state: ModuleState,
+	options: PresetOptions = { overtimeRed: true },
+): CompanionPresetDefinitions {
 	const presets: CompanionPresetDefinitions = {}
-	const roleSlugs = state.roleSlugs()
+	const overtimeFeedbacks = options.overtimeRed ? [{ feedbackId: 'timerOvertime', options: {}, style: bg(RED) }] : []
 
-	// MARK: - Cues (Selected Roles)
 	for (const cueState of FIRABLE_CUE_STATES) {
-		const bgcolor = combineRgb(...CUE_STATE_COLOR[cueState])
-		const color = combineRgb(...CUE_STATE_TEXT_COLOR[cueState])
-		const label = CUE_STATE_LABELS[cueState]
-
-		presets[`cue_selected_${cueState.toLowerCase()}`] = {
+		presets[`cue_${cueState.toLowerCase()}`] = {
 			type: 'button',
 			category: 'Cues',
-			name: `Selected • ${label}`,
-			style: {
-				text: `Selected\n${label}`,
-				size: 'auto',
-				color: color,
-				bgcolor: bgcolor,
-			},
-			steps: [
-				{
-					down: [{ actionId: 'fireSelectedCue', options: { state: cueState } }],
-					up: [],
-				},
-			],
+			name: `Fire ${CUE_STATE_LABELS[cueState]} (selected roles)`,
+			style: face({
+				icon: cueState === 'GO' ? 'cueGo' : cueState === 'OFF' ? 'cueClear' : undefined,
+				label: CUE_STATE_LABELS[cueState],
+				color: combineRgb(...CUE_STATE_COLOR[cueState]),
+				textColor: combineRgb(...CUE_STATE_TEXT_COLOR[cueState]),
+				plate: false,
+			}),
 			feedbacks: [],
+			steps: [{ down: [{ actionId: 'fireSelectedCue', options: { state: cueState } }], up: [] }],
 		}
 	}
 
-	// Clear All Cues
 	presets['cue_clear_all'] = {
 		type: 'button',
 		category: 'Cues',
 		name: 'Clear All Cues',
-		style: {
-			text: 'Clear\nAll',
-			size: 'auto',
-			color: WHITE,
-			bgcolor: GREY,
-		},
-		steps: [
-			{
-				down: [{ actionId: 'clearAllCues', options: {} }],
-				up: [],
-			},
-		],
+		style: face({ icon: 'cueClear', label: 'Clear All', color: DARK, plate: false }),
 		feedbacks: [],
+		steps: [{ down: [{ actionId: 'clearAllCues', options: {} }], up: [] }],
 	}
 
-	// MARK: - Cues Per Role
 	for (const role of state.roles) {
-		const slug = roleSlugs.get(role.id) || 'unknown'
-
-		// Cue state buttons for this role
-		for (const cueState of FIRABLE_CUE_STATES) {
-			const bgcolor = combineRgb(...CUE_STATE_COLOR[cueState])
-			const color = combineRgb(...CUE_STATE_TEXT_COLOR[cueState])
-			const label = CUE_STATE_LABELS[cueState]
-
-			presets[`role_${slug}_cue_${cueState.toLowerCase()}`] = {
+		const key = presetKey(role.id)
+		presets[`role_cycle_${key}`] = {
+			type: 'button',
+			category: 'Cues — Toggle',
+			name: `${role.name} — Cycle (Standby → Go! → Clear)`,
+			style: face({
+				icon: 'cueGo',
+				label: role.name,
+				color: combineRgb(...CUE_STATE_COLOR.OFF),
+				textColor: combineRgb(...CUE_STATE_TEXT_COLOR.OFF),
+				plate: false,
+			}),
+			feedbacks: [{ feedbackId: 'roleCueColor', options: { roleId: role.id } }],
+			steps: [{ down: [{ actionId: 'cycleRoleCue', options: { roleId: role.id } }], up: [] }],
+		}
+		for (const cueState of ['STANDBY', 'GO', 'OFF'] as const) {
+			presets[`role_${cueState.toLowerCase()}_${key}`] = {
 				type: 'button',
 				category: 'Cues — Per Role',
-				name: `${role.name} • ${label}`,
-				style: {
-					text: `${role.name}\n${label}`,
-					size: 'auto',
-					color: color,
-					bgcolor: bgcolor,
-				},
-				steps: [
-					{
-						down: [{ actionId: 'fireRoleCue', options: { roleId: role.id, state: cueState } }],
-						up: [],
-					},
-				],
+				name: `${role.name} — ${CUE_STATE_LABELS[cueState]}`,
+				style: face({
+					icon: cueState === 'GO' ? 'cueGo' : cueState === 'OFF' ? 'cueClear' : undefined,
+					label: `${role.name}\\n${CUE_STATE_LABELS[cueState]}`,
+					color: DARK,
+					plate: false,
+				}),
 				feedbacks: [
-					// `roleCueIs`'s own defaultStyle is fixed to GO's green — override
-					// per preset so a STANDBY/FLASH_* button confirms in its own
-					// color instead of flashing green for every state.
 					{
 						feedbackId: 'roleCueIs',
 						options: { roleId: role.id, state: cueState },
-						style: { bgcolor, color },
+						style: {
+							bgcolor: combineRgb(...CUE_STATE_COLOR[cueState]),
+							color: combineRgb(...CUE_STATE_TEXT_COLOR[cueState]),
+						},
 					},
 				],
+				steps: [{ down: [{ actionId: 'fireRoleCue', options: { roleId: role.id, state: cueState } }], up: [] }],
 			}
 		}
+	}
 
-		// Toggle button for this role: one button that both shows the role's
-		// live cue color/label (roleCueColor feedback) AND, on press, advances
-		// to the next state in the Standby → Go! → Clear cycle — the next
-		// action fires is read off the exact same state the feedback is
-		// already painting the button with, so the button never needs to know
-		// its own "current" state ahead of time the way a fixed-state button does.
-		presets[`role_${slug}_toggle`] = {
+	const transport: { id: string; name: string; icon: string; label: string; actionId: string; color: number }[] = [
+		{
+			id: 'timer_start',
+			name: 'Start Timer',
+			icon: 'timerStart',
+			label: 'Start',
+			actionId: 'timerStart',
+			color: GREEN,
+		},
+		{
+			id: 'timer_pause',
+			name: 'Pause Timer',
+			icon: 'timerPause',
+			label: 'Pause',
+			actionId: 'timerPause',
+			color: AMBER,
+		},
+		{
+			id: 'timer_toggle',
+			name: 'Start/Pause Timer',
+			icon: 'timerStart',
+			label: 'Start/Pause',
+			actionId: 'timerToggle',
+			color: BLUE,
+		},
+		{ id: 'timer_reset', name: 'Reset Timer', icon: 'timerReset', label: 'Reset', actionId: 'timerReset', color: GREY },
+	]
+	for (const t of transport) {
+		presets[t.id] = {
 			type: 'button',
-			category: 'Cues — Toggle',
-			name: `${role.name} — Toggle`,
-			style: {
-				text: `${role.name}\n$(self:role_${slug}_label)`,
-				size: 'auto',
-				color: WHITE,
-				bgcolor: DARK,
-			},
-			steps: [
-				{
-					down: [{ actionId: 'cycleRoleCue', options: { roleId: role.id } }],
-					up: [],
-				},
-			],
+			category: 'Timer Transport',
+			name: t.name,
+			style: face({ icon: t.icon, label: t.label, color: t.color }),
 			feedbacks: [
 				{
-					feedbackId: 'roleCueColor',
-					options: { roleId: role.id },
+					feedbackId: 'timerRunning',
+					options: {},
+					style: bg(GREEN),
 				},
 			],
+			steps: [{ down: [{ actionId: t.actionId, options: {} }], up: [] }],
 		}
 	}
 
-	// MARK: - Timer Transport
-	presets['timer_start'] = {
-		type: 'button',
-		category: 'Timer Transport',
-		name: 'Timer Start',
-		style: {
-			text: 'Start',
-			size: 'auto',
-			color: WHITE,
-			bgcolor: GREEN,
-		},
-		steps: [
-			{
-				down: [{ actionId: 'timerStart', options: {} }],
-				up: [],
-			},
-		],
-		feedbacks: [],
-	}
-
-	presets['timer_pause'] = {
-		type: 'button',
-		category: 'Timer Transport',
-		name: 'Timer Pause',
-		style: {
-			text: 'Pause',
-			size: 'auto',
-			color: WHITE,
-			bgcolor: GREY,
-		},
-		steps: [
-			{
-				down: [{ actionId: 'timerPause', options: {} }],
-				up: [],
-			},
-		],
-		feedbacks: [],
-	}
-
-	presets['timer_toggle'] = {
-		type: 'button',
-		category: 'Timer Transport',
-		name: 'Timer Toggle',
-		style: {
-			text: 'Toggle\n$(self:active_item_remaining)',
-			size: 'auto',
-			color: WHITE,
-			bgcolor: BLUE,
-		},
-		steps: [
-			{
-				down: [{ actionId: 'timerToggle', options: {} }],
-				up: [],
-			},
-		],
-		feedbacks: [
-			{
-				feedbackId: 'timerRunning',
-				options: {},
-			},
-		],
-	}
-
-	presets['timer_reset'] = {
-		type: 'button',
-		category: 'Timer Transport',
-		name: 'Timer Reset',
-		style: {
-			text: 'Reset',
-			size: 'auto',
-			color: WHITE,
-			bgcolor: GREY,
-		},
-		steps: [
-			{
-				down: [{ actionId: 'timerReset', options: {} }],
-				up: [],
-			},
-		],
-		feedbacks: [],
-	}
-
-	// MARK: - Timer Nudges
-	const nudges = [
-		{ label: '-5m', seconds: -300 },
-		{ label: '-1m', seconds: -60 },
-		{ label: '-30s', seconds: -30 },
-		{ label: '+30s', seconds: 30 },
-		{ label: '+1m', seconds: 60 },
-		{ label: '+5m', seconds: 300 },
-	]
-
-	for (const nudge of nudges) {
-		const bgcolor = nudge.seconds < 0 ? RED : GREEN
-		presets[`timer_adjust_${nudge.seconds}`] = {
+	for (const seconds of [10, 30, 60, 300]) {
+		const label = seconds === 300 ? '5m' : seconds === 60 ? '1m' : `${seconds}s`
+		presets[`timer_plus_${seconds}`] = {
 			type: 'button',
 			category: 'Timer Nudges',
-			name: `Timer ${nudge.label}`,
-			style: {
-				text: nudge.label,
-				size: 'auto',
-				color: WHITE,
-				bgcolor: bgcolor,
-			},
-			steps: [
-				{
-					down: [{ actionId: 'timerAdjust', options: { seconds: nudge.seconds } }],
-					up: [],
-				},
-			],
+			name: `Add ${label}`,
+			style: face({ icon: 'timerAdd', label: `+${label}`, color: BLUE }),
 			feedbacks: [],
+			steps: [{ down: [{ actionId: 'timerAdjust', options: { seconds } }], up: [] }],
+		}
+		presets[`timer_minus_${seconds}`] = {
+			type: 'button',
+			category: 'Timer Nudges',
+			name: `Subtract ${label}`,
+			style: face({ icon: 'timerSubtract', label: `−${label}`, color: BLUE }),
+			feedbacks: [],
+			steps: [{ down: [{ actionId: 'timerAdjust', options: { seconds: -seconds } }], up: [] }],
 		}
 	}
 
-	// MARK: - Service Navigation
 	presets['plan_previous'] = {
 		type: 'button',
 		category: 'Service Navigation',
 		name: 'Previous Item',
-		style: {
-			text: '◂ Prev Item',
-			size: 'auto',
-			color: WHITE,
-			bgcolor: BLUE,
-		},
-		steps: [
-			{
-				down: [{ actionId: 'planPrevious', options: {} }],
-				up: [],
-			},
-		],
-		feedbacks: [],
-	}
-
-	presets['plan_active_item_status'] = {
-		type: 'button',
-		category: 'Service Navigation',
-		name: 'Active Item Status',
-		style: {
-			text: '$(self:active_item_title)\n$(self:active_item_remaining)',
-			size: 'auto',
-			color: WHITE,
-			bgcolor: DARK,
-		},
-		steps: [
-			{
-				down: [],
-				up: [],
-			},
-		],
-		feedbacks: [
-			{
-				feedbackId: 'timerOvertime',
-				options: {},
-			},
-			{
-				feedbackId: 'timerUnderThreshold',
-				options: { thresholdSeconds: 30 },
-			},
-		],
+		style: face({ icon: 'planPrevious', label: 'Prev Item', color: BLUE }),
+		feedbacks: [{ feedbackId: 'atStartOfPlan', options: {}, style: bg(GREY) }],
+		steps: [{ down: [{ actionId: 'planPrevious', options: {} }], up: [] }],
 	}
 
 	presets['plan_next'] = {
 		type: 'button',
 		category: 'Service Navigation',
 		name: 'Next Item',
-		style: {
-			text: 'Next Item ▸',
-			size: 'auto',
-			color: WHITE,
-			bgcolor: BLUE,
-		},
-		steps: [
+		style: face({ icon: 'planNext', label: 'Next Item', color: BLUE }),
+		feedbacks: [
 			{
-				down: [{ actionId: 'planNext', options: {} }],
-				up: [],
+				feedbackId: 'atEndOfPlan',
+				options: {},
+				style: bg(GREY),
 			},
 		],
-		feedbacks: [],
+		steps: [{ down: [{ actionId: 'planNext', options: {} }], up: [] }],
 	}
 
 	presets['plan_next_service'] = {
 		type: 'button',
 		category: 'Service Navigation',
-		name: 'Next Service',
-		style: {
-			text: 'Next Service',
-			size: 'auto',
-			color: WHITE,
-			bgcolor: GREY,
-		},
-		steps: [
-			{
-				down: [{ actionId: 'planNextService', options: {} }],
-				up: [],
-			},
-		],
+		name: 'Load Next Service',
+		style: face({ icon: 'planNextService', label: 'Next Service', color: PURPLE }),
 		feedbacks: [],
+		steps: [{ down: [{ actionId: 'planNextService', options: {} }], up: [] }],
 	}
 
-	// MARK: - Planning Center
-	presets['pco_sign_in'] = {
+	presets['active_item_status'] = {
 		type: 'button',
-		category: 'Planning Center',
-		name: 'PCO Sign In',
+		category: 'Service Navigation',
+		name: 'Active Item & Time Remaining',
+		style: face({
+			label: '$(13years:active_item_title)\\n$(13years:active_item_remaining)',
+			color: DARK,
+			size: 'auto',
+		}),
+		feedbacks: [
+			...overtimeFeedbacks,
+			{ feedbackId: 'timerUnderThreshold', options: { thresholdSeconds: 30 }, style: bg(RED) },
+		],
+		steps: [{ down: [], up: [] }],
+	}
+
+	presets['plan_next_hold'] = {
+		type: 'button',
+		category: 'Service Navigation',
+		name: 'Next Item (Hold Clock)',
+		style: face({ icon: 'planNext', label: 'Next (Hold)', color: AMBER }),
+		feedbacks: [{ feedbackId: 'atEndOfPlan', options: {}, style: bg(GREY) }],
+		steps: [{ down: [{ actionId: 'planNext', options: { startTimer: false } }], up: [] }],
+	}
+
+	presets['countdown_stages'] = {
+		type: 'button',
+		category: 'Service Navigation',
+		name: 'Countdown (amber at 60s, red at 30s)',
+		style: face({
+			label: '$(13years:active_item_title)\\n$(13years:active_item_remaining)',
+			color: DARK,
+			size: 'auto',
+		}),
+		feedbacks: [
+			{
+				feedbackId: 'timerUnderThreshold',
+				options: { thresholdSeconds: 60 },
+				style: { bgcolor: AMBER, color: INK_DARK },
+			},
+			{ feedbackId: 'timerUnderThreshold', options: { thresholdSeconds: 30 }, style: bg(RED) },
+			...overtimeFeedbacks,
+		],
+		steps: [{ down: [], up: [] }],
+	}
+
+	const timingStatus: { id: string; name: string; label: string; icon: string }[] = [
+		{
+			id: 'projected_end',
+			name: 'Projected End Time',
+			label: 'Ends\\n$(13years:projected_end_time)',
+			icon: 'timerClock',
+		},
+		{
+			id: 'service_remaining',
+			name: 'Service Time Remaining',
+			label: 'Left\\n$(13years:service_remaining_total)',
+			icon: 'stopwatch',
+		},
+		{
+			id: 'service_over_under',
+			name: 'Service Over/Under (needs a schedule)',
+			label: 'Over/Under\\n$(13years:service_over_under)',
+			icon: 'schedule',
+		},
+		{ id: 'next_item_length', name: 'Next Item Length', label: 'Next\\n$(13years:next_item_length)', icon: 'planNext' },
+	]
+	for (const t of timingStatus) {
+		presets[`timing_${t.id}`] = {
+			type: 'button',
+			category: 'Service Timing',
+			name: t.name,
+			style: face({ icon: t.icon, label: t.label, color: DARK, size: 'auto' }),
+			feedbacks: [],
+			steps: [{ down: [], up: [] }],
+		}
+	}
+
+	presets['timing_progress'] = {
+		type: 'button',
+		category: 'Service Timing',
+		name: 'Live Item Progress',
 		style: {
-			text: 'PCO\nSign In',
+			text: '$(13years:active_item_progress_pct)%',
+			size: '24',
+			color: WHITE,
+			bgcolor: DARK,
+			alignment: 'center:top',
+		},
+		feedbacks: [{ feedbackId: 'activeItemProgressBar', options: {} }],
+		steps: [{ down: [], up: [] }],
+	}
+
+	for (let row = 1; row <= RUNDOWN_ROWS; row++) {
+		presets[`rundown_row_${row}`] = {
+			type: 'button',
+			category: 'Rundown',
+			name: `Row ${row}`,
+			style: face({
+				label: `$(13years:rundown_row_${row}_title)\\n$(13years:rundown_row_${row}_length)`,
+				color: DARK,
+				size: 'auto',
+			}),
+			feedbacks: [{ feedbackId: 'planItemIsActive', options: { rowIndex: row }, style: bg(GREEN) }],
+			steps: [{ down: [{ actionId: 'planJumpToRow', options: { rowIndex: row } }], up: [] }],
+		}
+	}
+
+	presets['rundown_page_up'] = {
+		type: 'button',
+		category: 'Rundown',
+		name: 'Rundown Page Up',
+		style: face({
+			icon: 'planPrevious',
+			label: 'Page Up\\n$(13years:rundown_page)/$(13years:rundown_page_count)',
+			color: BLUE,
+		}),
+		feedbacks: [],
+		steps: [{ down: [{ actionId: 'rundownPageUp', options: {} }], up: [] }],
+	}
+
+	presets['rundown_page_down'] = {
+		type: 'button',
+		category: 'Rundown',
+		name: 'Rundown Page Down',
+		style: face({
+			icon: 'planNext',
+			label: 'Page Down\\n$(13years:rundown_page)/$(13years:rundown_page_count)',
+			color: BLUE,
+		}),
+		feedbacks: [],
+		steps: [{ down: [{ actionId: 'rundownPageDown', options: {} }], up: [] }],
+	}
+
+	const entryAppend = (key: string) => [{ actionId: 'timerEntryAppend', options: { key } }]
+	const entryKey = (
+		id: string,
+		pos: string,
+		glyph: string,
+		label: string,
+		actions: { actionId: string; options: Record<string, string> }[],
+		feedbacks: PresetFeedback[] = [],
+	) => {
+		presets[`timer_entry_key_${id}`] = {
+			type: 'button',
+			category: 'Timer Entry',
+			name: `${pos} • ${label}`,
+			style: face({
+				glyph: USE_GLYPH_KEY_FACES ? glyph : undefined,
+				label: USE_GLYPH_KEY_FACES ? '' : label,
+				size: '24',
+			}),
+			feedbacks,
+			steps: [{ down: actions, up: [] }],
+		}
+	}
+
+	presets['timer_entry_screen'] = {
+		type: 'button',
+		category: 'Timer Entry',
+		name: 'R0 • Screen',
+		style: {
+			text: '$(13years:timer_entry_buffer)\\n$(13years:timer_entry_preview)',
 			size: 'auto',
 			color: WHITE,
-			bgcolor: BLUE,
+			bgcolor: DARK,
+			alignment: 'center:center',
 		},
-		steps: [
+		feedbacks: [],
+		steps: [{ down: [], up: [] }],
+	}
+
+	const signFeedback = (sign: '+' | '-', glyph: string) => [
+		{ feedbackId: 'timerEntrySignIs', options: { sign }, style: lit(BLUE, glyph) },
+	]
+	entryKey(
+		'clear',
+		'R1C1',
+		'clear',
+		'C',
+		[{ actionId: 'timerEntryClear', options: {} }],
+		[{ feedbackId: 'timerEntryInProgress', options: {}, style: lit(AMBER, 'clear') }],
+	)
+	entryKey('h', 'R1C2', 'h', 'h', entryAppend('h'))
+	entryKey('m', 'R1C3', 'm', 'm', entryAppend('m'))
+	entryKey('s', 'R1C4', 's', 's', entryAppend('s'))
+	entryKey('7', 'R2C1', '7', '7', entryAppend('7'))
+	entryKey('8', 'R2C2', '8', '8', entryAppend('8'))
+	entryKey('9', 'R2C3', '9', '9', entryAppend('9'))
+	entryKey(
+		'minus',
+		'R2C4',
+		'minus',
+		'−',
+		[{ actionId: 'timerEntrySign', options: { sign: '-' } }],
+		signFeedback('-', 'minus'),
+	)
+	entryKey('4', 'R3C1', '4', '4', entryAppend('4'))
+	entryKey('5', 'R3C2', '5', '5', entryAppend('5'))
+	entryKey('6', 'R3C3', '6', '6', entryAppend('6'))
+	entryKey(
+		'plus',
+		'R3C4',
+		'plus',
+		'+',
+		[{ actionId: 'timerEntrySign', options: { sign: '+' } }],
+		signFeedback('+', 'plus'),
+	)
+	entryKey('1', 'R4C1', '1', '1', entryAppend('1'))
+	entryKey('2', 'R4C2', '2', '2', entryAppend('2'))
+	entryKey('3', 'R4C3', '3', '3', entryAppend('3'))
+	entryKey(
+		'enter',
+		'R4C4',
+		'enter',
+		'↵',
+		[{ actionId: 'timerEntryCommit', options: {} }],
+		[{ feedbackId: 'timerEntryCommittable', options: {}, style: lit(GREEN, 'enter') }],
+	)
+	entryKey('0', 'R5C1', '0', '0', entryAppend('0'))
+	entryKey('colon', 'R5C2', 'colon', ':', entryAppend(':'))
+	entryKey(
+		'backspace',
+		'R5C3',
+		'backspace',
+		'⌫',
+		[{ actionId: 'timerEntryBackspace', options: {} }],
+		[{ feedbackId: 'timerEntryInProgress', options: {}, style: lit(AMBER, 'backspace') }],
+	)
+
+	const firstWaypoint = state.waypointChoices()[0]?.id ?? ''
+
+	presets['waypoint_go'] = {
+		type: 'button',
+		category: 'Waypoints',
+		name: 'Go To Waypoint',
+		style: face({ icon: 'waypointGo', label: 'Waypoint', color: PURPLE }),
+		feedbacks: [
 			{
-				down: [{ actionId: 'pcoSignIn', options: {} }],
-				up: [],
+				feedbackId: 'waypointAssigned',
+				options: { waypoint: firstWaypoint },
+				style: bg(PURPLE),
+				isInverted: true,
+			},
+			{
+				feedbackId: 'waypointIsActive',
+				options: { waypoint: firstWaypoint },
+				style: bg(GREEN),
 			},
 		],
+		steps: [{ down: [{ actionId: 'waypointGo', options: { waypoint: firstWaypoint, startTimer: true } }], up: [] }],
+	}
+
+	presets['waypoint_go_no_timer'] = {
+		type: 'button',
+		category: 'Waypoints',
+		name: 'Go To Waypoint (don’t start the clock)',
+		style: face({ icon: 'waypointFlag', label: 'Pre-roll', color: PURPLE }),
+		feedbacks: [
+			{
+				feedbackId: 'waypointAssigned',
+				options: { waypoint: firstWaypoint },
+				style: bg(GREY),
+				isInverted: true,
+			},
+		],
+		steps: [{ down: [{ actionId: 'waypointGo', options: { waypoint: firstWaypoint, startTimer: false } }], up: [] }],
+	}
+
+	presets['waypoint_next'] = {
+		type: 'button',
+		category: 'Waypoints',
+		name: 'Go To Next Waypoint',
+		style: face({ icon: 'waypointGo', label: 'Next Waypoint', color: PURPLE }),
 		feedbacks: [],
+		steps: [{ down: [{ actionId: 'waypointNext', options: { startTimer: true } }], up: [] }],
+	}
+
+	presets['waypoint_assign_active'] = {
+		type: 'button',
+		category: 'Waypoints',
+		name: 'Assign Waypoint To Live Item',
+		style: face({ icon: 'waypointFlag', label: 'Tag Live Item', color: GREY }),
+		feedbacks: [],
+		steps: [{ down: [{ actionId: 'waypointAssignToActiveItem', options: { waypoint: firstWaypoint } }], up: [] }],
+	}
+
+	presets['waypoint_status'] = {
+		type: 'button',
+		category: 'Waypoints',
+		name: 'Waypoints Assigned (status)',
+		style: face({
+			icon: 'waypointGo',
+			label: '$(13years:waypoints_assigned_count)/$(13years:waypoint_count)',
+			color: DARK,
+		}),
+		feedbacks: [],
+		steps: [{ down: [], up: [] }],
+	}
+
+	const firstSchedule = state.scheduleChoices()[0]?.id ?? ''
+
+	presets['schedule_go_live_next'] = {
+		type: 'button',
+		category: 'Service Schedules',
+		name: 'Bring Next Schedule Live',
+		style: face({ icon: 'scheduleGoLive', label: 'Go Live Now', color: GREEN }),
+		feedbacks: [
+			{
+				feedbackId: 'hasUpcomingSchedule',
+				options: {},
+				style: bg(GREY),
+				isInverted: true,
+			},
+		],
+		steps: [{ down: [{ actionId: 'scheduleGoLiveNext', options: {} }], up: [] }],
+	}
+
+	presets['schedule_go_live'] = {
+		type: 'button',
+		category: 'Service Schedules',
+		name: 'Bring A Specific Schedule Live',
+		style: face({ icon: 'schedule', label: 'Go Live', color: GREEN }),
+		feedbacks: [
+			{
+				feedbackId: 'scheduleEnabled',
+				options: { scheduleId: firstSchedule },
+				style: bg(GREY),
+				isInverted: true,
+			},
+		],
+		steps: [{ down: [{ actionId: 'scheduleGoLive', options: { scheduleId: firstSchedule } }], up: [] }],
+	}
+
+	presets['next_schedule_status'] = {
+		type: 'button',
+		category: 'Service Schedules',
+		name: 'Next Service (status)',
+		style: face({ icon: 'schedule', label: '$(13years:next_schedule_title)', color: DARK, size: 'auto' }),
+		feedbacks: [{ feedbackId: 'hasUpcomingSchedule', options: {}, style: bg(BLUE) }],
+		steps: [{ down: [], up: [] }],
+	}
+
+	presets['duration_toggle_live'] = {
+		type: 'button',
+		category: 'Projected / Actual',
+		name: 'Toggle Projected/Actual (live item)',
+		style: face({ icon: 'stopwatch', label: '$(13years:active_item_duration_type)', color: GREY }),
+		feedbacks: [{ feedbackId: 'timerIsActual', options: {}, style: bg(PURPLE) }],
+		steps: [{ down: [{ actionId: 'timerActualToggle', options: {} }], up: [] }],
+	}
+
+	presets['duration_toggle_item'] = {
+		type: 'button',
+		category: 'Projected / Actual',
+		name: 'Toggle Projected/Actual (plan item)',
+		style: face({ icon: 'timerClock', label: 'Item Actual', color: GREY }),
+		feedbacks: [{ feedbackId: 'planItemIsActual', options: { itemId: '' }, style: bg(PURPLE) }],
+		steps: [{ down: [{ actionId: 'planToggleItemDurationActual', options: { itemId: '' } }], up: [] }],
+	}
+
+	presets['duration_status'] = {
+		type: 'button',
+		category: 'Projected / Actual',
+		name: 'Duration Type (status)',
+		style: face({ icon: 'timerClock', label: '$(13years:active_item_duration_type)', color: DARK }),
+		feedbacks: [{ feedbackId: 'timerIsActual', options: {}, style: bg(PURPLE) }],
+		steps: [{ down: [], up: [] }],
+	}
+
+	presets['message_send'] = {
+		type: 'button',
+		category: 'Messages',
+		name: 'Send Message',
+		style: face({ icon: 'messageSend', label: 'Send', color: BLUE }),
+		feedbacks: [],
+		steps: [{ down: [{ actionId: 'sendMessage', options: { text: 'Standby', isHighPriority: false } }], up: [] }],
+	}
+
+	presets['notification_dismiss'] = {
+		type: 'button',
+		category: 'Messages',
+		name: 'Dismiss Standing Notification',
+		style: face({ icon: 'notificationDismiss', label: 'Dismiss', color: GREY }),
+		feedbacks: [
+			{
+				feedbackId: 'notificationStanding',
+				options: {},
+				style: { bgcolor: AMBER, color: INK_DARK },
+			},
+		],
+		steps: [{ down: [{ actionId: 'dismissNotification', options: {} }], up: [] }],
+	}
+
+	presets['messages_clear'] = {
+		type: 'button',
+		category: 'Messages',
+		name: 'Clear Message History',
+		style: face({ icon: 'messagesClear', label: 'Clear History', color: RED }),
+		feedbacks: [],
+		steps: [{ down: [{ actionId: 'clearMessages', options: {} }], up: [] }],
+	}
+
+	presets['last_message_status'] = {
+		type: 'button',
+		category: 'Messages',
+		name: 'Last Message (status)',
+		style: face({ icon: 'message', label: '$(13years:last_message_text)', color: DARK, size: 'auto' }),
+		feedbacks: [{ feedbackId: 'notificationStanding', options: {}, style: bg(AMBER) }],
+		steps: [{ down: [], up: [] }],
 	}
 
 	presets['pco_refresh_plans'] = {
 		type: 'button',
 		category: 'Planning Center',
 		name: 'Refresh Plans',
-		style: {
-			text: 'Refresh\nPlans',
-			size: 'auto',
-			color: WHITE,
-			bgcolor: GREY,
-		},
-		steps: [
-			{
-				down: [{ actionId: 'pcoRefreshPlans', options: {} }],
-				up: [],
-			},
-		],
+		style: face({ icon: 'pcoSync', label: 'Refresh Plans', color: BLUE }),
 		feedbacks: [],
+		steps: [{ down: [{ actionId: 'pcoRefreshPlans', options: {} }], up: [] }],
 	}
 
-	presets['pco_live_sync'] = {
+	presets['pco_live_sync_on'] = {
 		type: 'button',
 		category: 'Planning Center',
-		name: 'PCO Live Sync',
-		style: {
-			text: 'Live\nSync',
-			size: 'auto',
-			color: WHITE,
-			bgcolor: BLUE,
-		},
-		steps: [
-			{
-				down: [{ actionId: 'pcoSetLiveSync', options: { enabled: true } }],
-				up: [],
-			},
-		],
-		feedbacks: [
-			{
-				feedbackId: 'pcoConnected',
-				options: {},
-			},
-		],
+		name: 'Take PCO Live Control',
+		style: face({ icon: 'pcoSync', label: 'Take Control', color: GREEN }),
+		feedbacks: [{ feedbackId: 'pcoConnected', options: {}, style: bg(GREEN) }],
+		steps: [{ down: [{ actionId: 'pcoSetLiveSync', options: { enabled: true } }], up: [] }],
 	}
 
-	presets['pco_sign_out'] = {
+	presets['pco_live_sync_off'] = {
 		type: 'button',
 		category: 'Planning Center',
-		name: 'PCO Sign Out',
-		style: {
-			text: 'PCO\nSign Out',
-			size: 'auto',
-			color: WHITE,
-			bgcolor: GREY,
-		},
-		steps: [
-			{
-				down: [{ actionId: 'pcoSignOut', options: {} }],
-				up: [],
-			},
-		],
+		name: 'Release PCO Live Control',
+		style: face({ icon: 'pcoSync', label: 'Release', color: GREY }),
 		feedbacks: [],
+		steps: [{ down: [{ actionId: 'pcoSetLiveSync', options: { enabled: false } }], up: [] }],
 	}
 
-	// MARK: - Messages
-	const messagePresets = [
-		{ id: 'msg_2min', text: '2 minutes', action: '2 minutes' },
-		{ id: 'msg_1min', text: '1 minute', action: '1 minute' },
-		{ id: 'msg_standby', text: 'Standby', action: 'Standby' },
-		{ id: 'msg_go', text: 'Go', action: 'Go', isHighPriority: true },
-	]
-
-	for (const preset of messagePresets) {
-		presets[preset.id] = {
-			type: 'button',
-			category: 'Messages',
-			name: `Send: ${preset.text}`,
-			style: {
-				text: preset.text,
-				size: 'auto',
-				color: WHITE,
-				bgcolor: BLUE,
-			},
-			steps: [
-				{
-					down: [
-						{
-							actionId: 'sendMessage',
-							options: {
-								text: preset.action,
-								targetRoleId: '',
-								isHighPriority: preset.isHighPriority ?? false,
-							},
-						},
-					],
-					up: [],
-				},
-			],
-			feedbacks: [],
-		}
-	}
-
-	presets['msg_clear_all'] = {
+	presets['pco_status'] = {
 		type: 'button',
-		category: 'Messages',
-		name: 'Clear Messages',
-		style: {
-			text: 'Clear',
-			size: 'auto',
-			color: WHITE,
-			bgcolor: GREY,
-		},
-		steps: [
-			{
-				down: [{ actionId: 'clearMessages', options: {} }],
-				up: [],
-			},
-		],
-		feedbacks: [],
+		category: 'Planning Center',
+		name: 'Planning Center (status)',
+		style: face({ icon: 'pcoSync', label: '$(13years:pco_user_name)', color: DARK, size: 'auto' }),
+		feedbacks: [{ feedbackId: 'pcoConnected', options: {}, style: bg(GREEN) }],
+		steps: [{ down: [], up: [] }],
 	}
 
-	presets['msg_last_status'] = {
-		type: 'button',
-		category: 'Messages',
-		name: 'Last Message',
-		style: {
-			text: '$(self:last_message_text)',
-			size: 'auto',
-			color: WHITE,
-			bgcolor: DARK,
-		},
-		steps: [
-			{
-				down: [],
-				up: [],
-			},
-		],
-		feedbacks: [],
-	}
-
-	// MARK: - Status Displays
-	presets['connection_status'] = {
+	presets['status_connection'] = {
 		type: 'button',
 		category: 'Status Displays',
-		name: 'Producer Connection',
-		style: {
-			text: 'Producer\n$(self:connection_status)',
-			size: 'auto',
-			color: WHITE,
-			bgcolor: DARK,
-		},
-		steps: [
-			{
-				down: [],
-				up: [],
-			},
-		],
-		feedbacks: [
-			{
-				feedbackId: 'connectionLost',
-				options: {},
-			},
-		],
+		name: 'Connection (status)',
+		style: face({ icon: 'status', label: '$(13years:connection_status)', color: GREEN }),
+		feedbacks: [{ feedbackId: 'connectionLost', options: {}, style: bg(RED) }],
+		steps: [{ down: [], up: [] }],
 	}
 
-	presets['plan_at_end_status'] = {
+	presets['status_connection_health'] = {
 		type: 'button',
 		category: 'Status Displays',
-		name: 'End of Plan Indicator',
-		style: {
-			text: 'End of Plan',
+		name: 'Connection Health (state, v2/legacy, round trip)',
+		style: face({
+			label: '$(13years:connection_status)\\n$(13years:sync_quality)\\nRTT $(13years:sync_rtt_ms) ms',
+			color: GREEN,
 			size: 'auto',
-			color: WHITE,
-			bgcolor: DARK,
-		},
-		steps: [
-			{
-				down: [],
-				up: [],
-			},
+		}),
+		feedbacks: [
+			{ feedbackId: 'connectionLost', options: {}, style: bg(RED) },
+			{ feedbackId: 'connectionStale', options: {}, style: { bgcolor: AMBER, color: INK_DARK } },
 		],
+		steps: [{ down: [], up: [] }],
+	}
+
+	presets['status_action_error'] = {
+		type: 'button',
+		category: 'Status Displays',
+		name: 'Last Action Error (shows for 10 seconds)',
+		style: face({ icon: 'warning', label: '$(13years:last_action_error)', color: DARK, size: 'auto' }),
+		feedbacks: [{ feedbackId: 'actionFailed', options: {}, style: bg(RED) }],
+		steps: [{ down: [], up: [] }],
+	}
+
+	presets['status_connection_stale'] = {
+		type: 'button',
+		category: 'Status Displays',
+		name: 'Connection Stale (banner)',
+		style: face({ icon: 'warning', label: 'Link OK', color: DARK }),
 		feedbacks: [
 			{
-				feedbackId: 'atEndOfPlan',
+				feedbackId: 'connectionStale',
 				options: {},
+				style: { bgcolor: AMBER, color: INK_DARK, text: 'NO DATA' },
 			},
 		],
+		steps: [{ down: [], up: [] }],
 	}
 
-	// MARK: - Timer Entry
-	//
-	// The app's calculator-style time-entry grid (TimeEntryKeypad in
-	// TimeEntryPopover.swift), one Companion button per key. Every key types
-	// into the same buffer this module holds; only Enter talks to the app.
-	//
-	// Companion presets are single buttons — nothing can span two cells — so the
-	// popover's double-tall Enter and double-wide 0 are ordinary one-cell
-	// buttons here, and Backspace (keyboard-only in the app) takes the cell that
-	// frees up. Names carry their row/column so the whole pad can be dropped
-	// onto a page in grid order:
-	//
-	//   R0    screen readout (the popover's screen sits above its grid)
-	//   R1    C  h  m  s
-	//   R2    7  8  9  −
-	//   R3    4  5  6  +
-	//   R4    1  2  3  ↵
-	//   R5    0  :  ⌫
-	// The popover's screen: what's been typed, over what it would resolve to.
-	// Not a key — pressing it does nothing, same as the box in the app.
-	presets['timer_entry_screen'] = {
+	presets['status_end_of_plan'] = {
 		type: 'button',
-		category: 'Timer Entry',
-		name: 'R0 • Entry Screen',
-		style: {
-			text: '$(self:timer_entry_buffer)\n$(self:timer_entry_preview)',
-			size: 'auto',
-			color: WHITE,
-			bgcolor: DARK,
-		},
-		steps: [
-			{
-				down: [],
-				up: [],
-			},
-		],
-		feedbacks: [],
+		category: 'Status Displays',
+		name: 'End Of Plan (status)',
+		style: face({ icon: 'warning', label: 'End Of Plan', color: DARK }),
+		feedbacks: [{ feedbackId: 'atEndOfPlan', options: {}, style: bg(AMBER) }],
+		steps: [{ down: [], up: [] }],
 	}
 
-	const entryAppendKeys = [
-		{ position: 'R1C2', key: 'h' },
-		{ position: 'R1C3', key: 'm' },
-		{ position: 'R1C4', key: 's' },
-		{ position: 'R2C1', key: '7' },
-		{ position: 'R2C2', key: '8' },
-		{ position: 'R2C3', key: '9' },
-		{ position: 'R3C1', key: '4' },
-		{ position: 'R3C2', key: '5' },
-		{ position: 'R3C3', key: '6' },
-		{ position: 'R4C1', key: '1' },
-		{ position: 'R4C2', key: '2' },
-		{ position: 'R4C3', key: '3' },
-		{ position: 'R5C1', key: '0' },
-		{ position: 'R5C2', key: ':' },
-	]
-
-	for (const entry of entryAppendKeys) {
-		const idSuffix = entry.key === ':' ? 'colon' : entry.key
-		presets[`timer_entry_key_${idSuffix}`] = {
-			type: 'button',
-			category: 'Timer Entry',
-			name: `${entry.position} • ${entry.key}`,
-			style: {
-				...keyFace(idSuffix, entry.key),
-				color: WHITE,
-				bgcolor: DARK,
-			},
-			steps: [
-				{
-					down: [{ actionId: 'timerEntryAppend', options: { key: entry.key } }],
-					up: [],
-				},
-			],
-			feedbacks: [],
-		}
-	}
-
-	// The two sign keys light up while their sign is the one on the buffer —
-	// pressing the lit one again clears it, exactly as in the popover.
-	const entrySignKeys = [
-		{ position: 'R2C4', id: 'minus', sign: '-', face: '−' },
-		{ position: 'R3C4', id: 'plus', sign: '+', face: '+' },
-	]
-
-	for (const entry of entrySignKeys) {
-		presets[`timer_entry_sign_${entry.id}`] = {
-			type: 'button',
-			category: 'Timer Entry',
-			name: `${entry.position} • ${entry.face} (Relative)`,
-			style: {
-				...keyFace(entry.id, entry.face),
-				color: WHITE,
-				bgcolor: DARK,
-			},
-			steps: [
-				{
-					down: [{ actionId: 'timerEntrySign', options: { sign: entry.sign } }],
-					up: [],
-				},
-			],
-			feedbacks: [
-				{
-					feedbackId: 'timerEntrySignIs',
-					options: { sign: entry.sign },
-					style: litFace(entry.id, entry.face, BLUE, 'light'),
-				},
-			],
-		}
-	}
-
-	presets['timer_entry_clear'] = {
+	presets['status_relay'] = {
 		type: 'button',
-		category: 'Timer Entry',
-		name: 'R1C1 • C (Clear)',
-		style: {
-			...keyFace('clear', 'C'),
-			color: WHITE,
-			bgcolor: GREY,
-		},
-		steps: [
-			{
-				down: [{ actionId: 'timerEntryClear', options: {} }],
-				up: [],
-			},
-		],
-		feedbacks: [
-			{
-				feedbackId: 'timerEntryInProgress',
-				options: {},
-				style: litFace('clear', 'C', AMBER, 'dark'),
-			},
-		],
-	}
-
-	presets['timer_entry_backspace'] = {
-		type: 'button',
-		category: 'Timer Entry',
-		name: 'R5C3 • ⌫ Backspace',
-		style: {
-			...keyFace('backspace', '⌫'),
-			color: WHITE,
-			bgcolor: GREY,
-		},
-		steps: [
-			{
-				down: [{ actionId: 'timerEntryBackspace', options: {} }],
-				up: [],
-			},
-		],
-		feedbacks: [
-			{
-				feedbackId: 'timerEntryInProgress',
-				options: {},
-				style: litFace('backspace', '\u232B', AMBER, 'dark'),
-			},
-		],
-	}
-
-	presets['timer_entry_enter'] = {
-		type: 'button',
-		category: 'Timer Entry',
-		name: 'R4C4 • ↵ Enter (Commit)',
-		style: {
-			...keyFace('enter', '↵'),
-			color: WHITE,
-			bgcolor: GREY,
-		},
-		steps: [
-			{
-				down: [{ actionId: 'timerEntryCommit', options: {} }],
-				up: [],
-			},
-		],
-		feedbacks: [
-			{
-				feedbackId: 'timerEntryCommittable',
-				options: {},
-				style: litFace('enter', '\u21B5', GREEN, 'dark'),
-			},
-		],
+		category: 'Status Displays',
+		name: 'Cloud Relay (status)',
+		style: face({ icon: 'cloud', label: 'Relay', color: DARK }),
+		feedbacks: [{ feedbackId: 'relayEnabled', options: {}, style: bg(GREEN) }],
+		steps: [{ down: [], up: [] }],
 	}
 
 	return presets

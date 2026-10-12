@@ -3,10 +3,18 @@
 	"name": "13 Years Producer",
 	"shortname": "13yearsproducer",
 	"manufacturer": "13 Years",
-	"products": ["13 Years Producer"],
-	"keywords": ["church production", "live production", "cue system", "countdown timer", "planning center"],
+	"products": [
+		"13 Years Producer"
+	],
+	"keywords": [
+		"church production",
+		"live production",
+		"cue system",
+		"countdown timer",
+		"planning center"
+	],
 	"description": "Drive standby/GO cues to pagers and control the countdown timer and service plan of the 13 Years Producer app via its local Control API — over a WebSocket-pushed connection, never polled.",
-	"version": "0.2.0",
+	"version": "1.3.0",
 	"license": "MIT",
 	"repository": "git@github.com:TristonYoder/companion-module-13YearsProducer.git",
 	"bugs": "https://github.com/TristonYoder/companion-module-13YearsProducer/issues",
@@ -17,9 +25,9 @@
 		}
 	],
 	"runtime": {
-		"type": "node18",
+		"type": "node22",
 		"api": "nodejs-ipc",
-		"apiVersion": "1.1.0",
+		"apiVersion": "1.14.1",
 		"entrypoint": "dist/index.js"
 	},
 	"legacyIds": []

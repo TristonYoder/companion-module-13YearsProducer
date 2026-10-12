@@ -1,10 +1,12 @@
 import WebSocket from 'ws'
+import { describeConnectionError } from './connection.js'
 import type {
 	ActiveTimer,
 	CommandReply,
 	ControlAPIErrorBody,
 	ControlAPIState,
 	CueStateValue,
+	DigestData,
 	HealthInfo,
 	IdentifiedName,
 	InterTeamMessage,
@@ -20,12 +22,33 @@ import type {
 	RoleUpdateBody,
 	SettingsStatus,
 	ServerEvent,
+	StartTimerBody,
+	SyncReplyData,
 	TimerRemainingBody,
-} from './types'
+	TimerSnapshot,
+	PlanItemWaypointsBody,
+	ScheduleCreateBody,
+	ScheduleEntry,
+	ScheduleStatus,
+	ScheduleUpdateBody,
+	WaypointAssignBody,
+	WaypointCreateBody,
+	WaypointFireBody,
+	WaypointStatus,
+	WaypointUpdateBody,
+} from './types.js'
 
 export interface ResolvedApiConfig {
 	host: string
 	port: number
+}
+
+const REQUEST_TIMEOUT_MS = 3000
+
+function isFullSnapshot(value: unknown): value is ControlAPIState {
+	return (
+		typeof value === 'object' && value !== null && 'roles' in value && 'plan' in value && 'selectedRoleIds' in value
+	)
 }
 
 export class ApiError extends Error {
@@ -38,17 +61,11 @@ export class ApiError extends Error {
 	}
 }
 
-/**
- * REST client for the Control API — see CONTROL-API.md. One method per route
- * this module drives. There is no authentication (the API has none), so no
- * header is sent beyond `Content-Type`.
- *
- * Mutating routes mostly return the full `ControlAPIState` snapshot; a few
- * (role/plan-item CRUD, PCO/Plotiphar sub-resources) return just their own
- * section, matching what the router actually sends back — see per-method notes.
- */
 export class ControlApi {
-	constructor(private getConfig: () => ResolvedApiConfig) {}
+	constructor(
+		private getConfig: () => ResolvedApiConfig,
+		private onSnapshot?: (snapshot: ControlAPIState) => void,
+	) {}
 
 	private get baseUrl(): string {
 		const { host, port } = this.getConfig()
@@ -61,6 +78,7 @@ export class ControlApi {
 		try {
 			res = await fetch(url, {
 				...init,
+				signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
 				headers: {
 					'Content-Type': 'application/json',
 					...init?.headers,
@@ -69,7 +87,7 @@ export class ControlApi {
 		} catch (err) {
 			throw new ApiError(
 				0,
-				`${init?.method ?? 'GET'} ${path} failed: ${err instanceof Error ? err.message : String(err)}`,
+				`${init?.method ?? 'GET'} ${path} failed: ${describeConnectionError(err) ?? (err instanceof Error ? err.message : String(err))}`,
 			)
 		}
 
@@ -78,7 +96,7 @@ export class ControlApi {
 			try {
 				body = (await res.json()) as ControlAPIErrorBody
 			} catch {
-				// Non-JSON error body — fall through with just the status.
+				body = undefined
 			}
 			throw new ApiError(
 				res.status,
@@ -97,21 +115,26 @@ export class ControlApi {
 	}
 
 	private async send<T>(method: string, path: string, body?: unknown): Promise<T> {
-		return this.request<T>(path, { method, body: body === undefined ? undefined : JSON.stringify(body) })
+		const result = await this.request<T>(path, { method, body: body === undefined ? undefined : JSON.stringify(body) })
+		if (isFullSnapshot(result)) this.onSnapshot?.(result)
+		return result
 	}
-
-	// MARK: Health & State
 
 	async getHealth(): Promise<HealthInfo> {
 		return this.get('/health')
 	}
 
-	/** The only place this module ever calls this — on connect, to prime state before the WebSocket's own `hello` arrives. Every other read comes from WebSocket pushes; this module does not poll. */
 	async getState(): Promise<ControlAPIState> {
 		return this.get('/state')
 	}
 
-	// MARK: Roles & selection
+	async getTimer(): Promise<TimerSnapshot> {
+		return this.get('/timer')
+	}
+
+	async sync(t0: number): Promise<SyncReplyData> {
+		return this.request('/sync', { method: 'POST', body: JSON.stringify({ t0 }) })
+	}
 
 	async listRoles(): Promise<RoleCue[]> {
 		return this.get('/roles')
@@ -141,14 +164,10 @@ export class ControlApi {
 		return this.get('/selection')
 	}
 
-	/** 409s if any id is unknown. */
 	async setSelection(roleIds: string[]): Promise<ControlAPIState> {
 		return this.send('PUT', '/selection', { roleIds })
 	}
 
-	// MARK: Cues
-
-	/** 409s ("No roles are selected") if `selectedRoleIds` doesn't currently match any known role — see `PUT /v1/selection` / `setSelection`. */
 	async fireSelectedCue(state: CueStateValue): Promise<ControlAPIState> {
 		return this.send('POST', '/cues/selected', { state })
 	}
@@ -156,8 +175,6 @@ export class ControlApi {
 	async clearAllCues(): Promise<ControlAPIState> {
 		return this.send('POST', '/cues/clear')
 	}
-
-	// MARK: Timer
 
 	async timerStart(): Promise<ControlAPIState> {
 		return this.send('POST', '/timer/start')
@@ -179,7 +196,6 @@ export class ControlApi {
 		return this.send('POST', '/timer/adjust', { seconds })
 	}
 
-	/** Either `{ seconds }` (absolute) or `{ input }` (the app's own GrandMA-style grammar: `"4350"`, `"+30s"`, `"1h30m"`). */
 	async timerSetRemaining(body: TimerRemainingBody): Promise<ControlAPIState> {
 		return this.send('POST', '/timer/remaining', body)
 	}
@@ -188,21 +204,18 @@ export class ControlApi {
 		return this.send('POST', '/timer/actual-override', { isActual })
 	}
 
-	// MARK: Plan
-
 	async getPlan(): Promise<PlanStatus> {
 		return this.get('/plan')
 	}
 
-	async planNext(): Promise<ControlAPIState> {
-		return this.send('POST', '/plan/next')
+	async planNext(startTimer?: boolean): Promise<ControlAPIState> {
+		return this.send('POST', '/plan/next', startTimerBody(startTimer))
 	}
 
-	async planPrevious(): Promise<ControlAPIState> {
-		return this.send('POST', '/plan/previous')
+	async planPrevious(startTimer?: boolean): Promise<ControlAPIState> {
+		return this.send('POST', '/plan/previous', startTimerBody(startTimer))
 	}
 
-	/** 202 — loads asynchronously from Planning Center; watch for a later `state` push. 409s if no PCO-synced plan is active. */
 	async planNextService(): Promise<ControlAPIState> {
 		return this.send('POST', '/plan/next-service')
 	}
@@ -235,23 +248,18 @@ export class ControlApi {
 		return this.send('POST', `/plan/items/${encodeURIComponent(id)}/duration-actual`, { isActual })
 	}
 
-	/** `itemIds` must list every current plan item exactly once. */
 	async reorderPlanItems(itemIds: string[]): Promise<PlanStatus> {
 		return this.send('POST', '/plan/items/reorder', { itemIds })
 	}
 
-	/** `Title | Type | Duration` per line — see ServiceFlowImporter.swift. */
 	async importPlan(text: string, title?: string): Promise<PlanStatus> {
 		return this.send('POST', '/plan/import', { text, title })
 	}
-
-	// MARK: Planning Center Online
 
 	async getPco(): Promise<PCOStatus> {
 		return this.get('/pco')
 	}
 
-	/** 202 — opens a browser on the device; this call cannot complete the OAuth grant. Watch for `pco.isConnected` to flip. */
 	async pcoSignIn(): Promise<ControlAPIState> {
 		return this.send('POST', '/pco/sign-in')
 	}
@@ -264,13 +272,11 @@ export class ControlApi {
 		return this.get('/pco/service-types')
 	}
 
-	/** 202 — watch for `pco.serviceTypes` to update. */
 	async refreshPcoServiceTypes(): Promise<ControlAPIState> {
 		return this.send('POST', '/pco/service-types/refresh')
 	}
 
-	/** 202. */
-	async selectPcoServiceType(id: string): Promise<ControlAPIState> {
+	async selectPcoServiceType(id: string | null): Promise<ControlAPIState> {
 		return this.send('POST', '/pco/service-type', { id })
 	}
 
@@ -282,33 +288,26 @@ export class ControlApi {
 		return this.get('/pco/plans')
 	}
 
-	/** 202. 409s if no service type is selected. */
 	async refreshPcoPlans(): Promise<ControlAPIState> {
 		return this.send('POST', '/pco/plans/refresh')
 	}
 
-	/** 202. */
 	async setPcoPlanFilter(filter: string): Promise<ControlAPIState> {
 		return this.send('POST', '/pco/plan-filter', { filter })
 	}
 
-	/** 202 — fetches the plan and replaces the local plan in the background; watch for `plan` to update. */
 	async syncPco(serviceTypeId: string, planId: string): Promise<ControlAPIState> {
 		return this.send('POST', '/pco/sync', { serviceTypeId, planId })
 	}
 
-	/** 202. */
 	async setPcoLiveSync(enabled: boolean): Promise<ControlAPIState> {
 		return this.send('POST', '/pco/live-sync', { enabled })
 	}
-
-	// MARK: Plotiphar
 
 	async getPlotiphar(): Promise<PlotipharStatus> {
 		return this.get('/plotiphar')
 	}
 
-	/** 202 — a pairing code appears in `plotiphar.pairingCode` shortly after. */
 	async startPlotipharPairing(): Promise<PlotipharStatus> {
 		return this.send('POST', '/plotiphar/pair/start')
 	}
@@ -317,7 +316,6 @@ export class ControlApi {
 		return this.send('POST', '/plotiphar/pair/cancel')
 	}
 
-	/** 202. */
 	async syncPlotipharAssignments(): Promise<PlotipharStatus> {
 		return this.send('POST', '/plotiphar/assignments/sync')
 	}
@@ -326,9 +324,6 @@ export class ControlApi {
 		return this.send('POST', '/plotiphar/disconnect')
 	}
 
-	// MARK: Network
-
-	/** 202, fire-and-forget UDP — no acknowledgement. 503s if this device can't determine its own LAN address. */
 	async networkPing(ip: string): Promise<ControlAPIState> {
 		return this.send('POST', '/network/ping', { ip })
 	}
@@ -341,18 +336,13 @@ export class ControlApi {
 		return this.send('POST', '/network/master', { isMaster })
 	}
 
-	// MARK: App navigation
-
 	async getUiMode(): Promise<{ mode: string }> {
 		return this.get('/ui/mode')
 	}
 
-	/** Accepts wire form (`PRODUCER_CONTROL`) or camelCase (`producerControl`). */
 	async setUiMode(mode: string): Promise<{ mode: string }> {
 		return this.send('PUT', '/ui/mode', { mode })
 	}
-
-	// MARK: Settings
 
 	async getSettings(): Promise<SettingsStatus> {
 		return this.get('/settings')
@@ -361,8 +351,6 @@ export class ControlApi {
 	async updateSettings(hourFormatThreshold?: string): Promise<SettingsStatus> {
 		return this.send('PATCH', '/settings', { hourFormatThreshold })
 	}
-
-	// MARK: Messages
 
 	async listMessages(): Promise<InterTeamMessage[]> {
 		return this.get('/messages')
@@ -376,49 +364,127 @@ export class ControlApi {
 		return this.send('DELETE', '/messages')
 	}
 
-	// MARK: Relay
-
 	async setRelay(body: { enabled?: boolean; host?: string }): Promise<ControlAPIState> {
 		return this.send('PUT', '/relay', body)
 	}
+
+	async dismissNotification(): Promise<ControlAPIState> {
+		return this.send('POST', '/messages/dismiss')
+	}
+
+	async listWaypoints(): Promise<WaypointStatus[]> {
+		return this.get('/waypoints')
+	}
+
+	async createWaypoint(name: string): Promise<WaypointStatus> {
+		return this.send('POST', '/waypoints', { name } satisfies WaypointCreateBody)
+	}
+
+	async getWaypoint(ref: string): Promise<WaypointStatus> {
+		return this.get(`/waypoints/${encodeURIComponent(ref)}`)
+	}
+
+	async updateWaypoint(ref: string, body: WaypointUpdateBody): Promise<WaypointStatus> {
+		return this.send('PATCH', `/waypoints/${encodeURIComponent(ref)}`, body)
+	}
+
+	async deleteWaypoint(ref: string): Promise<WaypointStatus[]> {
+		return this.send('DELETE', `/waypoints/${encodeURIComponent(ref)}`)
+	}
+
+	async fireWaypoint(ref: string, startTimer?: boolean): Promise<ControlAPIState> {
+		const body: WaypointFireBody | undefined = startTimer === undefined ? undefined : { startTimer }
+		return this.send('POST', `/waypoints/${encodeURIComponent(ref)}/go`, body)
+	}
+
+	async waypointNext(startTimer?: boolean): Promise<ControlAPIState> {
+		return this.send('POST', '/waypoints/next', startTimerBody(startTimer))
+	}
+
+	async assignWaypoint(ref: string, itemId: string | null): Promise<WaypointStatus> {
+		return this.send('POST', `/waypoints/${encodeURIComponent(ref)}/assign`, { itemId } satisfies WaypointAssignBody)
+	}
+
+	async setPlanItemWaypoints(itemId: string, waypoints: string[]): Promise<PlanStatus> {
+		return this.send('POST', `/plan/items/${encodeURIComponent(itemId)}/waypoints`, {
+			waypoints,
+		} satisfies PlanItemWaypointsBody)
+	}
+
+	async listSchedules(): Promise<ScheduleStatus> {
+		return this.get('/schedules')
+	}
+
+	async createSchedule(body: ScheduleCreateBody): Promise<ScheduleStatus> {
+		return this.send('POST', '/schedules', body)
+	}
+
+	async getSchedule(id: string): Promise<ScheduleEntry> {
+		return this.get(`/schedules/${encodeURIComponent(id)}`)
+	}
+
+	async updateSchedule(id: string, body: ScheduleUpdateBody): Promise<ScheduleEntry> {
+		return this.send('PATCH', `/schedules/${encodeURIComponent(id)}`, body)
+	}
+
+	async deleteSchedule(id: string): Promise<ScheduleStatus> {
+		return this.send('DELETE', `/schedules/${encodeURIComponent(id)}`)
+	}
+
+	async scheduleGoLive(id: string): Promise<ControlAPIState> {
+		return this.send('POST', `/schedules/${encodeURIComponent(id)}/go-live`)
+	}
+}
+
+function startTimerBody(startTimer: boolean | undefined): StartTimerBody | undefined {
+	return startTimer === undefined ? undefined : { startTimer }
 }
 
 export interface ControlSocketHandlers {
 	onHello?: (state: ControlAPIState) => void
 	onState?: (state: ControlAPIState) => void
 	onMessage?: (message: InterTeamMessage) => void
+	onTimer?: (timer: TimerSnapshot) => void
+	onDigest?: (digest: DigestData) => void
+	onFrame?: () => void
 	onOpen?: () => void
 	onClose?: (reason: string) => void
 	onError?: (err: Error) => void
 }
 
 const RECONNECT_DELAY_MS = 3000
+export const HANDSHAKE_TIMEOUT_MS = 5000
+export const SOCKET_COMMAND_TIMEOUT_MS = 5000
+const PING_INTERVAL_MS = 5000
+const PONG_DEADLINE_MS = 12000
+const PONG_DEADLINE_MS_V2 = 25000
 
-/**
- * The WebSocket half of the Control API — `ws://host:port/v1/socket`. This is
- * the module's *only* source of live state: it holds the socket open for the
- * life of the connection and drives every feedback/variable off the `hello`/
- * `state`/`message` pushes it receives. The module never polls `GET /v1/state`
- * on a timer; REST is used only for one-shot commands (`ControlApi` above).
- *
- * Reconnects automatically on close/error with a fixed backoff — a producer's
- * Mac sleeping or an iPad backgrounding (the API doesn't run while backgrounded
- * on iPad) are the expected ways this drops, not exceptional ones.
- */
 export class ControlSocket {
 	private ws: WebSocket | undefined
 	private reconnectTimer: ReturnType<typeof setTimeout> | undefined
 	private closedByUser = false
 	private pending = new Map<string, { resolve: (reply: CommandReply) => void; reject: (err: Error) => void }>()
 	private nextCommandId = 1
+	private keepaliveTimer: ReturnType<typeof setInterval> | undefined
+	private lastInboundAt = 0
+	private pongDeadlineMs = PONG_DEADLINE_MS
 
 	constructor(
 		private getConfig: () => ResolvedApiConfig,
 		private handlers: ControlSocketHandlers,
+		private options: { handshakeTimeoutMs?: number; commandTimeoutMs?: number } = {},
 	) {}
+
+	get pendingCount(): number {
+		return this.pending.size
+	}
 
 	get isOpen(): boolean {
 		return this.ws?.readyState === WebSocket.OPEN
+	}
+
+	setProtocolV2(enabled: boolean): void {
+		this.pongDeadlineMs = enabled ? PONG_DEADLINE_MS_V2 : PONG_DEADLINE_MS
 	}
 
 	connect(): void {
@@ -432,47 +498,110 @@ export class ControlSocket {
 			clearTimeout(this.reconnectTimer)
 			this.reconnectTimer = undefined
 		}
+		this.stopKeepalive()
 		this.ws?.close()
 		this.ws = undefined
-		for (const { reject } of this.pending.values()) reject(new Error('Socket closed'))
-		this.pending.clear()
+		this.rejectPending('Socket closed')
 	}
 
-	/** Send a command over the socket instead of REST (`op` is the dotted route form, e.g. `plan.next`). Not used by this module's own actions today — REST is simpler to reason about and to test — but kept public since the protocol supports it symmetrically. */
 	async sendCommand(op: string, body?: unknown): Promise<CommandReply> {
 		if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
 			return Promise.reject(new Error('Socket is not connected'))
 		}
 		const id = String(this.nextCommandId++)
 		const envelope = { id, op, body }
+		const timeoutMs = this.options.commandTimeoutMs ?? SOCKET_COMMAND_TIMEOUT_MS
 		return new Promise<CommandReply>((resolve, reject) => {
-			this.pending.set(id, { resolve, reject })
-			this.ws?.send(JSON.stringify(envelope))
+			const timer = setTimeout(() => {
+				this.pending.delete(id)
+				reject(new Error(`${op} timed out`))
+			}, timeoutMs)
+			this.pending.set(id, {
+				resolve: (reply) => {
+					clearTimeout(timer)
+					resolve(reply)
+				},
+				reject: (err) => {
+					clearTimeout(timer)
+					reject(err)
+				},
+			})
+			this.ws?.send(JSON.stringify(envelope), (err) => {
+				if (!err) return
+				clearTimeout(timer)
+				this.pending.delete(id)
+				reject(err)
+			})
 		})
+	}
+
+	private rejectPending(reason: string): void {
+		const waiting = [...this.pending.values()]
+		this.pending.clear()
+		for (const { reject } of waiting) reject(new Error(reason))
 	}
 
 	private openSocket(): void {
 		const { host, port } = this.getConfig()
 		const url = `ws://${host}:${port}/v1/socket`
-		const ws = new WebSocket(url)
+		const ws = new WebSocket(url, { handshakeTimeout: this.options.handshakeTimeoutMs ?? HANDSHAKE_TIMEOUT_MS })
 		this.ws = ws
+		let failure: string | null = null
 
 		ws.on('open', () => {
+			this.pongDeadlineMs = PONG_DEADLINE_MS
+			this.startKeepalive(ws)
 			this.handlers.onOpen?.()
 		})
 
 		ws.on('message', (data: WebSocket.RawData) => {
+			this.noteInbound(true)
 			this.handleMessage(rawDataToString(data))
 		})
 
+		ws.on('pong', () => {
+			this.noteInbound(false)
+		})
+
 		ws.on('close', () => {
-			this.handlers.onClose?.('closed')
+			if (this.ws !== ws) return
+			this.stopKeepalive()
+			this.rejectPending('Socket closed')
+			this.handlers.onClose?.(failure ?? 'closed')
 			this.scheduleReconnect()
 		})
 
 		ws.on('error', (err: Error) => {
+			failure = describeConnectionError(err) ?? failure
 			this.handlers.onError?.(err)
 		})
+	}
+
+	private noteInbound(dataFrame: boolean): void {
+		this.lastInboundAt = Date.now()
+		if (dataFrame) this.handlers.onFrame?.()
+	}
+
+	private startKeepalive(ws: WebSocket): void {
+		this.stopKeepalive()
+		this.lastInboundAt = Date.now()
+		this.keepaliveTimer = setInterval(() => {
+			if (Date.now() - this.lastInboundAt > this.pongDeadlineMs) {
+				this.handlers.onError?.(new Error('No reply to keepalive — reconnecting'))
+				ws.terminate()
+				return
+			}
+			try {
+				ws.ping()
+			} catch {
+				ws.terminate()
+			}
+		}, PING_INTERVAL_MS)
+	}
+
+	private stopKeepalive(): void {
+		if (this.keepaliveTimer) clearInterval(this.keepaliveTimer)
+		this.keepaliveTimer = undefined
 	}
 
 	private handleMessage(raw: string): void {
@@ -504,6 +633,12 @@ export class ControlSocket {
 				case 'message':
 					this.handlers.onMessage?.(parsed.data)
 					return
+				case 'timer':
+					this.handlers.onTimer?.(parsed.data)
+					return
+				case 'digest':
+					this.handlers.onDigest?.(parsed.data)
+					return
 			}
 		}
 	}
@@ -517,7 +652,6 @@ export class ControlSocket {
 	}
 }
 
-/** `WebSocket.RawData` is `Buffer | ArrayBuffer | Buffer[]` — never a JSON-serializable text frame by itself, so this normalizes all three to a UTF-8 string before `JSON.parse`. */
 function rawDataToString(data: WebSocket.RawData): string {
 	if (Array.isArray(data)) return Buffer.concat(data).toString('utf8')
 	if (Buffer.isBuffer(data)) return data.toString('utf8')

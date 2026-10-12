@@ -1,10 +1,4 @@
 #!/usr/bin/env node
-// Keeps package.json and companion/manifest.json's `version` in lockstep —
-// manifest.json is the one Companion actually shows users, and hand-editing
-// both independently is how they drift.
-//
-//   node scripts/sync-version.mjs 1.2.3   # apply a version to both files
-//   node scripts/sync-version.mjs --check # verify they agree (CI; offline)
 import { readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -16,8 +10,6 @@ const SEMVER = /^\d+\.\d+\.\d+$/
 
 const readJson = (p) => JSON.parse(readFileSync(p, 'utf8'))
 
-// Rewrites only the version field textually instead of re-serializing, so the
-// file's formatting (tabs) and key order survive untouched.
 function writeVersion(path, version) {
 	const before = readFileSync(path, 'utf8')
 	const after = before.replace(/("version"\s*:\s*)"[^"]*"/, `$1"${version}"`)
@@ -58,7 +50,6 @@ if (!SEMVER.test(target)) {
 	process.exit(1)
 }
 
-// Never move backwards — a released version is immutable.
 if (compare(target, pkgVersion) < 0) {
 	console.error(
 		`[sync-version] refusing to downgrade ${pkgVersion} -> ${target}.\n` +
