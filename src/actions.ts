@@ -9,7 +9,10 @@ import {
 	APP_MODES,
 	PCO_PLAN_FILTERS,
 	HOUR_FORMAT_THRESHOLDS,
+	SCHEDULE_RECURRENCES,
 	nextCueStateInCycle,
+	type PlanItemUpdateBody,
+	type RoleUpdateBody,
 } from './types.js'
 import type { TimerEntrySign } from './timerEntry.js'
 
@@ -45,16 +48,23 @@ function guarded(
 		try {
 			await Promise.resolve(callback(action, context))
 		} catch (err) {
+			let shown: string
 			if (err instanceof ApiError) {
 				const explained = explain?.(err)
 				if (explained) {
 					deps.log('warn', explained)
+					shown = explained
 				} else {
 					deps.log('error', `API error: ${err.message}`)
+					shown = err.message
 				}
 			} else {
-				deps.log('error', `Action failed: ${err instanceof Error ? err.message : String(err)}`)
+				shown = err instanceof Error ? err.message : String(err)
+				deps.log('error', `Action failed: ${shown}`)
 			}
+			// Surfaces on the `last_action_error` variable and `actionFailed` feedback for a few seconds.
+			deps.state.noteActionError(shown)
+			deps.refresh()
 		}
 	}
 }
@@ -75,7 +85,6 @@ function explainWaypointFailure(err: ApiError): string | undefined {
 	return undefined
 }
 
-/** The keys of the app's grid that simply append themselves to the buffer: digits, the unit suffixes, and the `:` separator. */
 const START_TIMER_OPTION = {
 	type: 'checkbox',
 	id: 'startTimer',
@@ -83,6 +92,34 @@ const START_TIMER_OPTION = {
 	default: true,
 } as const
 
+/**
+ * "Start the timer on arrival", where a missing value means ticked: a button
+ * saved before the option existed has no value, and used to get the app's own
+ * default (start the clock).
+ */
+export function startTimerOption(options: { startTimer?: unknown }): boolean {
+	return options.startTimer === undefined || options.startTimer === null ? true : Boolean(options.startTimer)
+}
+
+/** A parsable date-time as `YYYY-MM-DDTHH:MM:SSZ` (the app's ISO-8601 parser takes no fractional seconds), or `null`. */
+export function isoWithoutFraction(text: string): string | null {
+	const ms = Date.parse(text.trim())
+	if (Number.isNaN(ms)) return null
+	return new Date(ms).toISOString().replace(/\.\d{3}Z$/, 'Z')
+}
+
+const REPEAT_GUARD_OPTION = {
+	type: 'number',
+	id: 'ignoreRepeatMs',
+	label: 'Ignore repeat presses for N ms',
+	tooltip:
+		'Presses within this window of the last accepted one are dropped, so a double-tap cannot skip an item. 0 turns it off.',
+	default: 0,
+	min: 0,
+	max: 10000,
+} as const
+
+/** The keys of the app's grid that simply append themselves to the buffer: digits, the unit suffixes, and the `:` separator. */
 const TIMER_ENTRY_APPEND_KEYS = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'h', 'm', 's', ':']
 
 export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitions {
@@ -92,6 +129,7 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 	const scheduleChoices = deps.state.scheduleChoices()
 	const serviceTypeChoices = (deps.state.pco?.serviceTypes ?? []).map((t) => ({ id: t.id, label: t.name }))
 	const planChoices = (deps.state.pco?.plans ?? []).map((p) => ({ id: p.id, label: p.title }))
+	const noteCategoryChoices = (deps.state.pco?.noteCategories ?? []).map((c) => ({ id: c.id, label: c.name }))
 
 	return {
 		fireSelectedCue: {
@@ -385,17 +423,19 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 
 		planNext: {
 			name: 'Plan Next',
-			options: [START_TIMER_OPTION],
+			options: [START_TIMER_OPTION, REPEAT_GUARD_OPTION],
 			callback: guarded(async (action) => {
-				await deps.api.planNext(Boolean(action.options.startTimer))
+				if (deps.state.shouldIgnoreRepeat('planNext', Number(action.options.ignoreRepeatMs) || 0)) return
+				await deps.api.planNext(startTimerOption(action.options))
 			}, deps),
 		},
 
 		planPrevious: {
 			name: 'Plan Previous',
-			options: [START_TIMER_OPTION],
+			options: [START_TIMER_OPTION, REPEAT_GUARD_OPTION],
 			callback: guarded(async (action) => {
-				await deps.api.planPrevious(Boolean(action.options.startTimer))
+				if (deps.state.shouldIgnoreRepeat('planPrevious', Number(action.options.ignoreRepeatMs) || 0)) return
+				await deps.api.planPrevious(startTimerOption(action.options))
 			}, deps),
 		},
 
@@ -406,7 +446,7 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 			options: [START_TIMER_OPTION],
 			callback: guarded(
 				async (action) => {
-					await deps.api.waypointNext(Boolean(action.options.startTimer))
+					await deps.api.waypointNext(startTimerOption(action.options))
 				},
 				deps,
 				(err) => (err.status === 409 ? 'There is no waypoint ahead of the live item.' : undefined),
@@ -536,17 +576,39 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 					min: 0,
 					max: 86400,
 				},
+				{
+					type: 'dropdown',
+					id: 'noteCategoryId',
+					label: 'Note category (leave empty to keep notes unchanged)',
+					choices: [{ id: '', label: '— leave notes unchanged —' }, ...noteCategoryChoices],
+					default: '',
+					allowCustom: true,
+				},
+				{
+					type: 'textinput',
+					id: 'noteText',
+					label: 'Note text for that category (empty clears it)',
+					default: '',
+					useVariables: true,
+					isVisibleExpression: '$(options:noteCategoryId) != ""',
+				},
 			],
 			callback: guarded(async (action) => {
 				const itemId = optString(action.options.itemId)
 				const title = optString(action.options.title)
 				const itemType = optString(action.options.itemType)
 				const lengthInSeconds = Number(action.options.lengthInSeconds)
+				const noteCategoryId = optString(action.options.noteCategoryId)
 
-				const body: Record<string, string | number | boolean> = {}
+				const body: PlanItemUpdateBody = {}
 				if (title) body.title = title
 				if (itemType) body.itemType = itemType
 				if (lengthInSeconds) body.lengthInSeconds = lengthInSeconds
+				if (noteCategoryId) {
+					// The app takes the whole notes map, so merge into what the item holds rather than replacing the other categories.
+					const held = deps.state.plan?.items.find((i) => i.id === itemId)?.notes ?? {}
+					body.notes = { ...held, [noteCategoryId]: optString(action.options.noteText) }
+				}
 
 				await deps.api.updatePlanItem(itemId, body)
 			}, deps),
@@ -797,6 +859,14 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 					default: '',
 				},
 				{
+					type: 'dropdown',
+					id: 'senderRoleId',
+					label: 'Send As Role',
+					choices: [{ id: '', label: 'The Producer' }, ...roleChoices],
+					default: '',
+					allowCustom: true,
+				},
+				{
 					type: 'checkbox',
 					id: 'isHighPriority',
 					label: 'High Priority',
@@ -806,10 +876,12 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 			callback: guarded(async (action) => {
 				const text = optString(action.options.text)
 				const targetRoleId = optString(action.options.targetRoleId)
+				const senderRoleId = optString(action.options.senderRoleId)
 				const isHighPriority = Boolean(action.options.isHighPriority)
 				await deps.api.sendMessage({
 					text,
 					targetRoleId: targetRoleId || undefined,
+					senderRoleId: senderRoleId || undefined,
 					isHighPriority,
 				})
 			}, deps),
@@ -877,6 +949,27 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 					id: 'personName',
 					label: 'Person Name',
 					default: '',
+					isVisibleExpression: '!$(options:clearPerson)',
+				},
+				{
+					type: 'checkbox',
+					id: 'clearPerson',
+					label: 'Clear the assigned person',
+					default: false,
+				},
+				{
+					type: 'checkbox',
+					id: 'setNoteCategories',
+					label: 'Replace the assigned note categories',
+					default: false,
+				},
+				{
+					type: 'multidropdown',
+					id: 'assignedNoteCategories',
+					label: 'Assigned note categories (none selected clears them)',
+					choices: noteCategoryChoices,
+					default: [],
+					isVisibleExpression: '$(options:setNoteCategories)',
 				},
 			],
 			callback: guarded(async (action) => {
@@ -884,9 +977,14 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 				const name = optString(action.options.name)
 				const personName = optString(action.options.personName)
 
-				const body: Record<string, string> = {}
+				const body: RoleUpdateBody = {}
 				if (name) body.name = name
-				if (personName) body.personName = personName
+				if (action.options.clearPerson === true) body.personName = ''
+				else if (personName) body.personName = personName
+				if (action.options.setNoteCategories === true) {
+					const selected = action.options.assignedNoteCategories
+					body.assignedNoteCategories = Array.isArray(selected) ? selected.map(optString).filter(Boolean) : []
+				}
 
 				await deps.api.updateRole(roleId, body)
 			}, deps),
@@ -1113,7 +1211,7 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 			callback: guarded(
 				async (action) => {
 					const ref = optString(action.options.waypoint)
-					await deps.api.fireWaypoint(ref, Boolean(action.options.startTimer))
+					await deps.api.fireWaypoint(ref, startTimerOption(action.options))
 				},
 				deps,
 				explainWaypointFailure,
@@ -1290,6 +1388,51 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 		},
 
 		// MARK: - Service schedules
+
+		scheduleCreate: {
+			name: 'Create Schedule',
+			description:
+				'Adds a service schedule. Start time is ISO-8601 (2026-10-18T10:00:00-04:00); without an offset it is read as this machine\u2019s local time.',
+			options: [
+				{ type: 'textinput', id: 'title', label: 'Title', default: '', useVariables: true },
+				{
+					type: 'textinput',
+					id: 'startsAt',
+					label: 'Starts at (ISO-8601)',
+					default: '',
+					useVariables: true,
+				},
+				{
+					type: 'number',
+					id: 'minutes',
+					label: 'Lead time (minutes before the start)',
+					default: 30,
+					min: 0,
+					max: 720,
+				},
+				{
+					type: 'dropdown',
+					id: 'recurrence',
+					label: 'Repeats',
+					choices: SCHEDULE_RECURRENCES,
+					default: 'once',
+				},
+				{ type: 'checkbox', id: 'isEnabled', label: 'Enabled', default: true },
+			],
+			callback: guarded(async (action) => {
+				const title = optString(action.options.title).trim()
+				if (!title) throw new Error('Create Schedule needs a title')
+				const startsAt = isoWithoutFraction(optString(action.options.startsAt))
+				if (!startsAt) throw new Error('Create Schedule needs a start time in ISO-8601, e.g. 2026-10-18T10:00:00-04:00')
+				await deps.api.createSchedule({
+					title,
+					startsAt,
+					goLiveOffsetMinutes: Number(action.options.minutes),
+					recurrence: optString(action.options.recurrence) || 'once',
+					isEnabled: action.options.isEnabled !== false,
+				})
+			}, deps),
+		},
 
 		scheduleGoLive: {
 			name: 'Bring Schedule Live Now',

@@ -1,5 +1,5 @@
 import type { CompanionVariableDefinition, CompanionVariableValues } from '@companion-module/base'
-import { RUNDOWN_ROWS, type ModuleState } from './state.js'
+import { MAX_INDEXED_ROLES, RUNDOWN_ROWS, type ModuleState } from './state.js'
 import { CUE_STATE_LABELS } from './types.js'
 
 /**
@@ -15,6 +15,8 @@ export function getVariableDefinitions(state: ModuleState): CompanionVariableDef
 		{ variableId: 'connection_stale', name: 'Connection Is Stale (connected, but no data lately)' },
 		{ variableId: 'sync_offset_ms', name: 'Clock Offset To Producer (ms, producer minus this machine)' },
 		{ variableId: 'sync_rtt_ms', name: 'Clock Sync Round Trip (ms)' },
+		{ variableId: 'sync_quality', name: 'Sync Quality (v2 ±ms / legacy)' },
+		{ variableId: 'last_action_error', name: 'Last Action Error (clears after 10 s)' },
 		{ variableId: 'connected_api_clients', name: 'Connected Control API Clients' },
 		{ variableId: 'network_is_producer_live', name: 'Producer Is Live' },
 		{ variableId: 'network_is_lan_connected', name: 'LAN Connected' },
@@ -40,6 +42,10 @@ export function getVariableDefinitions(state: ModuleState): CompanionVariableDef
 		{ variableId: 'active_item_service_plan_title', name: 'Active Item Service Plan Title' },
 		{ variableId: 'active_item_remaining', name: 'Active Item Time Remaining' },
 		{ variableId: 'active_item_remaining_seconds', name: 'Active Item Time Remaining (Seconds)' },
+		{ variableId: 'active_item_elapsed', name: 'Active Item Elapsed (m:ss)' },
+		{ variableId: 'active_item_length', name: 'Active Item Length (m:ss)' },
+		{ variableId: 'active_item_overtime_text', name: 'Active Item Overtime (+m:ss, blank when not over)' },
+		{ variableId: 'item_ends_at', name: 'Active Item Ends At (local HH:MM:SS, while running)' },
 		{ variableId: 'active_item_is_overtime', name: 'Active Item Is Overtime' },
 		{ variableId: 'active_item_is_running', name: 'Active Item Is Running' },
 		{ variableId: 'active_item_duration_type', name: 'Active Item Duration Type (Projected/Actual)' },
@@ -113,6 +119,17 @@ export function getVariableDefinitions(state: ModuleState): CompanionVariableDef
 		)
 	}
 
+	// The same roles by position, for buttons authored against "role 3" rather than a name.
+	for (let index = 0; index < Math.min(state.roles.length, MAX_INDEXED_ROLES); index++) {
+		const n = index + 1
+		definitions.push(
+			{ variableId: `role_${n}_name`, name: `Role ${n} — name` },
+			{ variableId: `role_${n}_state`, name: `Role ${n} — cue state` },
+			{ variableId: `role_${n}_label`, name: `Role ${n} — cue label` },
+			{ variableId: `role_${n}_person`, name: `Role ${n} — assigned person` },
+		)
+	}
+
 	// Keyed by the waypoint's own slug — the same token the API resolves and a
 	// preset button is authored against, so `$(13years:waypoint_sermon_item)`
 	// reads as the waypoint you pressed.
@@ -136,6 +153,8 @@ export function getVariableValues(state: ModuleState): CompanionVariableValues {
 		connection_stale: state.isStale ? 'yes' : 'no',
 		sync_offset_ms: state.sync.offsetMs === null ? '' : Math.round(state.sync.offsetMs),
 		sync_rtt_ms: state.sync.rttMs === null ? '' : Math.round(state.sync.rttMs),
+		sync_quality: state.syncQualityText,
+		last_action_error: state.currentActionError,
 		connected_api_clients: state.settings?.connectedAPIClients ?? 0,
 		network_is_producer_live: state.network?.isProducerLive ? 'yes' : 'no',
 		network_is_lan_connected: state.network?.isLANConnected ? 'yes' : 'no',
@@ -158,6 +177,10 @@ export function getVariableValues(state: ModuleState): CompanionVariableValues {
 		active_item_service_plan_title: state.timer?.item.servicePlanTitle ?? '',
 		active_item_remaining: state.timerFormattedRemaining,
 		active_item_remaining_seconds: state.timerRemainingSeconds ?? 0,
+		active_item_elapsed: state.activeItemElapsedText,
+		active_item_length: state.activeItemLengthText,
+		active_item_overtime_text: state.activeItemOvertimeText,
+		item_ends_at: state.itemEndsAtText,
 		active_item_is_overtime: state.timerIsOvertime ? 'yes' : 'no',
 		active_item_is_running: state.timer?.isRunning ? 'yes' : 'no',
 		active_item_duration_type: state.timer?.isDurationActualForDisplay ? 'Actual' : 'Projected',
@@ -226,6 +249,14 @@ export function getVariableValues(state: ModuleState): CompanionVariableValues {
 		values[`role_${slug}_label`] = CUE_STATE_LABELS[role.state]
 		values[`role_${slug}_person`] = role.personName ?? ''
 	}
+
+	state.roles.slice(0, MAX_INDEXED_ROLES).forEach((role, index) => {
+		const n = index + 1
+		values[`role_${n}_name`] = role.name
+		values[`role_${n}_state`] = role.state
+		values[`role_${n}_label`] = CUE_STATE_LABELS[role.state]
+		values[`role_${n}_person`] = role.personName ?? ''
+	})
 
 	for (const waypoint of state.waypoints) {
 		values[`waypoint_${waypoint.slug}_item`] = waypoint.itemTitle ?? ''

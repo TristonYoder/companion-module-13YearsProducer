@@ -83,6 +83,11 @@ function lit(color: number, glyph: string) {
 	return { bgcolor: color, color: INK_DARK, png64: TIMER_ENTRY_GLYPHS_DARK[glyph] }
 }
 
+/** A role id as a preset-id segment: ids are UUID-like already, this only guards anything stranger. */
+function presetKey(id: string): string {
+	return id.replace(/[^A-Za-z0-9_-]/g, '_')
+}
+
 export function getPresetDefinitions(
 	state: ModuleState,
 	options: PresetOptions = { overtimeRed: true },
@@ -119,6 +124,55 @@ export function getPresetDefinitions(
 		style: face({ icon: 'cueClear', label: 'Clear All', color: DARK, plate: false }),
 		feedbacks: [],
 		steps: [{ down: [{ actionId: 'clearAllCues', options: {} }], up: [] }],
+	}
+
+	// MARK: - Per-role cues
+	//
+	// One set per role on the show, keyed by the role's (stable) id so a rename
+	// keeps the button a producer already dragged onto a page. They regenerate
+	// as roles come and go, because the definitions are rebuilt when the role
+	// list's signature changes.
+
+	for (const role of state.roles) {
+		const key = presetKey(role.id)
+		presets[`role_cycle_${key}`] = {
+			type: 'button',
+			category: 'Cues — Toggle',
+			name: `${role.name} — Cycle (Standby → Go! → Clear)`,
+			style: face({
+				icon: 'cueGo',
+				label: role.name,
+				color: combineRgb(...CUE_STATE_COLOR.OFF),
+				textColor: combineRgb(...CUE_STATE_TEXT_COLOR.OFF),
+				plate: false,
+			}),
+			feedbacks: [{ feedbackId: 'roleCueColor', options: { roleId: role.id } }],
+			steps: [{ down: [{ actionId: 'cycleRoleCue', options: { roleId: role.id } }], up: [] }],
+		}
+		for (const cueState of ['STANDBY', 'GO', 'OFF'] as const) {
+			presets[`role_${cueState.toLowerCase()}_${key}`] = {
+				type: 'button',
+				category: 'Cues — Per Role',
+				name: `${role.name} — ${CUE_STATE_LABELS[cueState]}`,
+				style: face({
+					icon: cueState === 'GO' ? 'cueGo' : cueState === 'OFF' ? 'cueClear' : undefined,
+					label: `${role.name}\\n${CUE_STATE_LABELS[cueState]}`,
+					color: DARK,
+					plate: false,
+				}),
+				feedbacks: [
+					{
+						feedbackId: 'roleCueIs',
+						options: { roleId: role.id, state: cueState },
+						style: {
+							bgcolor: combineRgb(...CUE_STATE_COLOR[cueState]),
+							color: combineRgb(...CUE_STATE_TEXT_COLOR[cueState]),
+						},
+					},
+				],
+				steps: [{ down: [{ actionId: 'fireRoleCue', options: { roleId: role.id, state: cueState } }], up: [] }],
+			}
+		}
 	}
 
 	// MARK: - Timer transport
@@ -705,6 +759,31 @@ export function getPresetDefinitions(
 		name: 'Connection (status)',
 		style: face({ icon: 'status', label: '$(13years:connection_status)', color: GREEN }),
 		feedbacks: [{ feedbackId: 'connectionLost', options: {}, style: bg(RED) }],
+		steps: [{ down: [], up: [] }],
+	}
+
+	presets['status_connection_health'] = {
+		type: 'button',
+		category: 'Status Displays',
+		name: 'Connection Health (state, v2/legacy, round trip)',
+		style: face({
+			label: '$(13years:connection_status)\\n$(13years:sync_quality)\\nRTT $(13years:sync_rtt_ms) ms',
+			color: GREEN,
+			size: 'auto',
+		}),
+		feedbacks: [
+			{ feedbackId: 'connectionLost', options: {}, style: bg(RED) },
+			{ feedbackId: 'connectionStale', options: {}, style: { bgcolor: AMBER, color: INK_DARK } },
+		],
+		steps: [{ down: [], up: [] }],
+	}
+
+	presets['status_action_error'] = {
+		type: 'button',
+		category: 'Status Displays',
+		name: 'Last Action Error (shows for 10 seconds)',
+		style: face({ icon: 'warning', label: '$(13years:last_action_error)', color: DARK, size: 'auto' }),
+		feedbacks: [{ feedbackId: 'actionFailed', options: {}, style: bg(RED) }],
 		steps: [{ down: [], up: [] }],
 	}
 

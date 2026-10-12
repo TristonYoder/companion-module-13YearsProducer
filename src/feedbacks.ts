@@ -69,6 +69,39 @@ export function getFeedbackDefinitions(state: ModuleState): CompanionFeedbackDef
 			},
 		},
 
+		roleSelected: {
+			type: 'boolean',
+			name: 'Role Is Selected',
+			description:
+				'True while the role is one of the app\u2019s currently selected roles (what Fire Selected Cue goes to).',
+			options: [
+				{
+					type: 'dropdown',
+					id: 'roleId',
+					label: 'Role',
+					choices: roleChoices,
+					allowCustom: true,
+					default: roleDefault,
+				},
+			],
+			defaultStyle: {
+				bgcolor: combineRgb(74, 144, 226),
+				color: combineRgb(255, 255, 255),
+			},
+			callback: (feedback) => state.isRoleSelected(optString(feedback.options.roleId)),
+		},
+
+		actionFailed: {
+			type: 'boolean',
+			name: 'Last Action Failed (for 10 seconds)',
+			options: [],
+			defaultStyle: {
+				bgcolor: combineRgb(204, 0, 0),
+				color: combineRgb(255, 255, 255),
+			},
+			callback: () => state.actionFailed,
+		},
+
 		timerRunning: {
 			type: 'boolean',
 			name: 'Timer Running',

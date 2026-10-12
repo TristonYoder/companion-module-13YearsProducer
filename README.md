@@ -12,13 +12,13 @@ There is no authentication: the app's Control API is off by default and has no t
 
 ### Sync protocol v2
 
-Newer apps speak the clock-synchronised protocol described in `Server/PROTOCOL-V2.md` of the Producer repo. Right after the socket opens the module sends the `proto` op with `{"version": 2}`; an app that does not answer 200 is treated as legacy and nothing below applies (1 Hz `timer` pushes, 5 s staleness, 12 s keepalive deadline — exactly as before).
+Newer apps speak the clock-synchronised protocol described in `Server/PROTOCOL-V2.md` of the Producer repo. Right after the socket opens the module sends the `proto` op with `{"version": 2}`; an app that does not answer 200 is treated as legacy and nothing below applies (1 Hz `timer` pushes, 7.5 s staleness, 12 s keepalive deadline).
 
 On a v2 link:
 
-- **Clock.** The module runs the `sync` op (a burst of 5 samples 100 ms apart on connect, then every 30 s), keeps the last 8 samples and uses the one with the smallest round trip. A change under 20 ms is slewed (25% per sample), anything larger jumps. `ModuleState.producerNowMs()` is the app's clock; `sync_offset_ms` and `sync_rtt_ms` expose the measurement.
+- **Clock.** The module runs the `sync` op (a burst of 5 samples 100 ms apart on connect, then every 30 s), keeps the last 8 samples and uses the one with the smallest round trip. A change under 20 ms is slewed (25% per sample), anything larger jumps. Sample times (`t0`/`t3`) and aging use a monotonic clock (`performance.now()` from an epoch captured at start-up), so a system clock step cannot corrupt an offset. Samples older than 90 s are ignored; a reply with rtt over 10 s or an offset beyond a day is ignored; a fresh offset further than `max(50 ms, 2 * rtt)` from the held best discards the older samples. A wake from sleep, a clock step (seen as the wall clock pulling away from the monotonic one, or a gap of more than 5 s between 1 s housekeeping ticks), a reconnect or a new producer epoch clears all samples and bursts again. `ModuleState.producerNowMs()` is the app's clock; `sync_offset_ms` and `sync_rtt_ms` expose the measurement.
 - **Local timer.** The app pushes a `timer` event only when the timer changes, carrying an `anchor`. The module computes elapsed and remaining from the anchor and the offset (`ModuleState.timerRemainingSeconds`, the single accessor every variable, feedback and the Timer Entry preview reads), and ticks on `anchorMs + k * 1000` of the app's clock. Each tick sends only the variables whose value changed and re-checks only the countdown feedbacks.
-- **Digest.** Every 10 s the app sends a `digest` event with FNV-1a 64 hashes of `roles`, `timer`, `plan` and `messages` (`src/sync.ts`, same test vectors as the spec). The module hashes its held snapshot the same way; any difference costs exactly one `GET /v1/state`, adopted through the usual `rev` guard. The digest is also the heartbeat, so staleness is 25 s of silence instead of 5 s.
+- **Digest.** Every 10 s the app sends a `digest` event with FNV-1a 64 hashes of `roles`, `timer`, `plan` and `messages` (`src/sync.ts`, same test vectors as the spec). The module hashes its held snapshot the same way; any difference costs exactly one `GET /v1/state`, adopted through the `rev` gate (a catch-up read is allowed to take an equal rev). `state` and `timer` events need a `rev` strictly greater than the one held and not more than 1,000,000 above it (unless the `epoch` changed or it is a hello); a digest repeating the held rev is simply verified. Anchors outside the protocol's ranges are ignored. The app's `epoch` (v2.1) in `hello`, `timer` and `digest` data marks a restart: a new one resets the anchor, rev gate and clock samples, bursts again and fetches the state once. The Control API has no `to` addressing, so the v2.1 addressing rules do not apply here. The digest is also the heartbeat, so staleness is 15 s of silence instead of 7.5 s (keepalive deadline 25 s instead of 12 s). Staleness counts data frames only; a pong does not reset it.
 
 `src/session.ts` holds the per-connection logic against an injectable clock and scheduler, which is how `unit/session.test.mjs` tests tick alignment and the digest path without a socket. The `sync protocol v2` block in `contract/` runs against a live app and skips itself when the app is older.
 
@@ -32,7 +32,7 @@ Companion presets are single buttons — nothing can span two cells — so the p
 
 The key faces are pre-rendered PNGs rather than Companion-drawn text, so the pad's digits match every other surface in the system — Inter, with its `zero` OpenType feature on for the slashed zero the app, the web pager, and the ESP32 pagers all show. They are drawn at 512×512, far above the 72px a Stream Deck key shows: Companion downsamples cleanly, and the surfaces that are larger than that (Stream Deck Plus, Satellite surfaces, the web UI at any zoom) get artwork that was never upscaled.
 
-Each face is generated twice, in white and in near-black (`TIMER_ENTRY_GLYPHS` and `TIMER_ENTRY_GLYPHS_DARK`). A glyph is ink on transparency so the preset's own `bgcolor` shows through — which is exactly what makes a white face vanish when a feedback repaints that background a light colour, as Clear and Backspace do the moment you start typing and Enter does when the buffer parses. Every lit state swaps in the dark cut (`litFace` in `src/presets.ts`) instead of only changing the colour behind the glyph.
+Each face is generated twice, in white and in near-black (`TIMER_ENTRY_GLYPHS` and `TIMER_ENTRY_GLYPHS_DARK`). A glyph is ink on transparency so the preset's own `bgcolor` shows through — which is exactly what makes a white face vanish when a feedback repaints that background a light colour, as Clear and Backspace do the moment you start typing and Enter does when the buffer parses. Every lit state swaps in the dark cut (`lit` in `src/presets.ts`) instead of only changing the colour behind the glyph.
 
 `src/glyphs.ts` is generated; regenerate it with:
 
@@ -46,10 +46,10 @@ Inter is licensed under the SIL Open Font License; see [Inter-LICENSE.txt](Inter
 
 ## Requirements
 
-Companion **5.0** or later, and Node **22.20+**. The module uses Companion's layered
-button presets (`@companion-module/base` 2.2), which is also why that dependency is
-currently pinned to a nightly — the layered graphics API hasn't landed in a stable
-release yet.
+Companion **5.0** or later, and Node **22.20+**. The module is built on
+`@companion-module/base` 1.14 (see `package.json`). Its presets have one image slot per
+button, so the icon and plate are flattened into a single image; layered presets would
+need base 2.x, which Companion 5.0.4 refuses to load (see the note in `src/presets.ts`).
 
 ## Development
 
@@ -76,8 +76,8 @@ To cut a release: bump `version` in both `package.json` and `companion/manifest.
 
 Button icons are Font Awesome 6 Free Solid glyphs, pre-rendered to base64 PNGs in
 `src/icons.ts` (along with the gradient plate) by `scripts/render-icons.swift` — a
-layered button's text element can only use Companion's own bundled faces, so an icon
-has to arrive as an image layer. The generated file is committed, so building the
+button's text can only use Companion's own bundled faces, so an icon
+has to arrive as an image. The generated file is committed, so building the
 module needs neither the font nor a Swift toolchain. Font Awesome Free is CC BY 4.0
 (icons) and SIL OFL 1.1 (fonts); see [Font-Awesome-LICENSE.txt](Font-Awesome-LICENSE.txt).
 
