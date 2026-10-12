@@ -299,7 +299,12 @@ export function getPresetDefinitions(
 			label: 'Over/Under\\n$(13yearsproducer:service_over_under)',
 			icon: 'schedule',
 		},
-		{ id: 'next_item_length', name: 'Next Item Length', label: 'Next\\n$(13yearsproducer:next_item_length)', icon: 'planNext' },
+		{
+			id: 'next_item_length',
+			name: 'Next Item Length',
+			label: 'Next\\n$(13yearsproducer:next_item_length)',
+			icon: 'planNext',
+		},
 	]
 	for (const t of timingStatus) {
 		presets[`timing_${t.id}`] = {
@@ -696,7 +701,8 @@ export function getPresetDefinitions(
 		category: 'Status Displays',
 		name: 'Connection Health (state, v2/legacy, round trip)',
 		style: face({
-			label: '$(13yearsproducer:connection_status)\\n$(13yearsproducer:sync_quality)\\nRTT $(13yearsproducer:sync_rtt_ms) ms',
+			label:
+				'$(13yearsproducer:connection_status)\\n$(13yearsproducer:sync_quality)\\nRTT $(13yearsproducer:sync_rtt_ms) ms',
 			color: GREEN,
 			size: 'auto',
 		}),
