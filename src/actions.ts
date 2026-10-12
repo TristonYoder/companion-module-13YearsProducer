@@ -1,7 +1,8 @@
 import type { CompanionActionDefinitions, CompanionActionEvent, CompanionActionContext } from '@companion-module/base'
-import { ApiError, ControlApi } from './api'
-import { ModuleState } from './state'
+import { ApiError, ControlApi } from './api.js'
+import { ModuleState, RUNDOWN_ROWS } from './state.js'
 import {
+	optString,
 	CUE_STATE_LABELS,
 	FIRABLE_CUE_STATES,
 	type CueStateValue,
@@ -9,8 +10,8 @@ import {
 	PCO_PLAN_FILTERS,
 	HOUR_FORMAT_THRESHOLDS,
 	nextCueStateInCycle,
-} from './types'
-import type { TimerEntrySign } from './timerEntry'
+} from './types.js'
+import type { TimerEntrySign } from './timerEntry.js'
 
 export interface ActionDeps {
 	api: ControlApi
@@ -25,19 +26,29 @@ export interface ActionDeps {
 	refresh: () => void
 }
 
-// Wrapper that catches ApiError and logs it, with special handling for fireSelectedCue 409
+/**
+ * Catches `ApiError` so a failed press logs instead of throwing into Companion.
+ *
+ * `explain` is how an action turns a bare status code into something an
+ * operator can act on. The API is deliberate about which code it returns —
+ * firing a waypoint answers 404 for "no such waypoint" and 409 for "exists but
+ * nothing in this week's plan carries it", which call for completely different
+ * fixes — and collapsing those into "API error: ..." would throw away the part
+ * that matters. Returning undefined falls through to the generic message.
+ */
 function guarded(
 	callback: (action: CompanionActionEvent, context: CompanionActionContext) => Promise<void> | void,
 	deps: ActionDeps,
-	isFireSelectedCue: boolean = false,
+	explain?: (err: ApiError) => string | undefined,
 ): (action: CompanionActionEvent, context: CompanionActionContext) => Promise<void> {
 	return async (action, context) => {
 		try {
 			await Promise.resolve(callback(action, context))
 		} catch (err) {
 			if (err instanceof ApiError) {
-				if (isFireSelectedCue && err.status === 409) {
-					deps.log('warn', 'No roles are selected. Use the "Set Selection" action first to select roles for this cue.')
+				const explained = explain?.(err)
+				if (explained) {
+					deps.log('warn', explained)
 				} else {
 					deps.log('error', `API error: ${err.message}`)
 				}
@@ -48,12 +59,37 @@ function guarded(
 	}
 }
 
+/**
+ * Why a "Go To Waypoint" press did nothing, in the operator's terms. The API
+ * names the offending waypoint in the error's `detail` on both codes, so this
+ * never has to be told which one was pressed.
+ */
+function explainWaypointFailure(err: ApiError): string | undefined {
+	const which = err.detail ? `"${err.detail}"` : 'That waypoint'
+	if (err.status === 404) {
+		return `${which} is not a waypoint. Check the name, or create it with the Create Waypoint action.`
+	}
+	if (err.status === 409) {
+		return `${which} exists, but nothing in the plan currently loaded carries it — assign it to an item first.`
+	}
+	return undefined
+}
+
 /** The keys of the app's grid that simply append themselves to the buffer: digits, the unit suffixes, and the `:` separator. */
+const START_TIMER_OPTION = {
+	type: 'checkbox',
+	id: 'startTimer',
+	label: 'Start the timer on arrival',
+	default: false,
+} as const
+
 const TIMER_ENTRY_APPEND_KEYS = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'h', 'm', 's', ':']
 
 export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitions {
 	const roleChoices = deps.state.roleChoices()
 	const planItemChoices = deps.state.planItemChoices()
+	const waypointChoices = deps.state.waypointChoices()
+	const scheduleChoices = deps.state.scheduleChoices()
 	const serviceTypeChoices = (deps.state.pco?.serviceTypes ?? []).map((t) => ({ id: t.id, label: t.name }))
 	const planChoices = (deps.state.pco?.plans ?? []).map((p) => ({ id: p.id, label: p.title }))
 
@@ -71,11 +107,14 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 			],
 			callback: guarded(
 				async (action) => {
-					const state = String(action.options.state) as CueStateValue
+					const state = optString(action.options.state) as CueStateValue
 					await deps.api.fireSelectedCue(state)
 				},
 				deps,
-				true,
+				(err) =>
+					err.status === 409
+						? 'No roles are selected. Use the "Set Selection" action first to choose which roles this cue goes to.'
+						: undefined,
 			),
 		},
 
@@ -99,8 +138,8 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 				},
 			],
 			callback: guarded(async (action) => {
-				const roleId = String(action.options.roleId)
-				const state = String(action.options.state) as CueStateValue
+				const roleId = optString(action.options.roleId)
+				const state = optString(action.options.state) as CueStateValue
 				await deps.api.fireRoleCue(roleId, state)
 			}, deps),
 		},
@@ -123,7 +162,7 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 				},
 			],
 			callback: guarded(async (action) => {
-				const roleId = String(action.options.roleId)
+				const roleId = optString(action.options.roleId)
 				const current = deps.state.roleById(roleId)?.state ?? 'OFF'
 				const next = nextCueStateInCycle(current)
 				await deps.api.fireRoleCue(roleId, next)
@@ -235,7 +274,7 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 				},
 			],
 			callback: guarded(async (action) => {
-				const input = String(action.options.input)
+				const input = optString(action.options.input)
 				await deps.api.timerSetRemaining({ input })
 			}, deps),
 		},
@@ -264,7 +303,7 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 				},
 			],
 			callback: guarded(async (action) => {
-				deps.state.appendTimerEntry(String(action.options.key))
+				deps.state.appendTimerEntry(optString(action.options.key))
 				deps.refresh()
 			}, deps),
 		},
@@ -284,7 +323,7 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 				},
 			],
 			callback: guarded(async (action) => {
-				deps.state.setTimerEntrySign(String(action.options.sign) as TimerEntrySign)
+				deps.state.setTimerEntrySign(optString(action.options.sign) as TimerEntrySign)
 				deps.refresh()
 			}, deps),
 		},
@@ -346,17 +385,59 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 
 		planNext: {
 			name: 'Plan Next',
-			options: [],
-			callback: guarded(async () => {
-				await deps.api.planNext()
+			options: [START_TIMER_OPTION],
+			callback: guarded(async (action) => {
+				await deps.api.planNext(action.options.startTimer ? true : undefined)
 			}, deps),
 		},
 
 		planPrevious: {
 			name: 'Plan Previous',
+			options: [START_TIMER_OPTION],
+			callback: guarded(async (action) => {
+				await deps.api.planPrevious(action.options.startTimer ? true : undefined)
+			}, deps),
+		},
+
+		waypointNext: {
+			name: 'Go To Next Waypoint',
+			description:
+				'Jumps to the next waypoint ahead of the live item. Does nothing (with a warning) when there is none.',
+			options: [START_TIMER_OPTION],
+			callback: guarded(
+				async (action) => {
+					await deps.api.waypointNext(action.options.startTimer ? true : undefined)
+				},
+				deps,
+				(err) => (err.status === 409 ? 'There is no waypoint ahead of the live item.' : undefined),
+			),
+		},
+
+		planJumpToRow: {
+			name: 'Rundown: Jump to Row',
+			description: 'Jumps to the item shown on this row of the current rundown page.',
+			options: [{ type: 'number', id: 'rowIndex', label: 'Row (1-8)', default: 1, min: 1, max: RUNDOWN_ROWS }],
+			callback: guarded(async (action) => {
+				const item = deps.state.rundownRow(Number(action.options.rowIndex))
+				if (item) await deps.api.setActiveItem(item.id)
+			}, deps),
+		},
+
+		rundownPageUp: {
+			name: 'Rundown: Previous Page',
 			options: [],
-			callback: guarded(async () => {
-				await deps.api.planPrevious()
+			callback: guarded(() => {
+				deps.state.pageRundown(-1)
+				deps.refresh()
+			}, deps),
+		},
+
+		rundownPageDown: {
+			name: 'Rundown: Next Page',
+			options: [],
+			callback: guarded(() => {
+				deps.state.pageRundown(1)
+				deps.refresh()
 			}, deps),
 		},
 
@@ -381,7 +462,7 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 				},
 			],
 			callback: guarded(async (action) => {
-				const itemId = String(action.options.itemId)
+				const itemId = optString(action.options.itemId)
 				await deps.api.setActiveItem(itemId)
 			}, deps),
 		},
@@ -417,8 +498,8 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 				},
 			],
 			callback: guarded(async (action) => {
-				const title = String(action.options.title)
-				const itemType = String(action.options.itemType)
+				const title = optString(action.options.title)
+				const itemType = optString(action.options.itemType)
 				const lengthInSeconds = Number(action.options.lengthInSeconds)
 				const isDurationActual = Boolean(action.options.isDurationActual)
 				await deps.api.addPlanItem({ title, itemType, lengthInSeconds, isDurationActual })
@@ -457,9 +538,9 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 				},
 			],
 			callback: guarded(async (action) => {
-				const itemId = String(action.options.itemId)
-				const title = String(action.options.title)
-				const itemType = String(action.options.itemType)
+				const itemId = optString(action.options.itemId)
+				const title = optString(action.options.title)
+				const itemType = optString(action.options.itemType)
 				const lengthInSeconds = Number(action.options.lengthInSeconds)
 
 				const body: Record<string, string | number | boolean> = {}
@@ -483,7 +564,7 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 				},
 			],
 			callback: guarded(async (action) => {
-				const itemId = String(action.options.itemId)
+				const itemId = optString(action.options.itemId)
 				await deps.api.deletePlanItem(itemId)
 			}, deps),
 		},
@@ -506,7 +587,7 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 				},
 			],
 			callback: guarded(async (action) => {
-				const itemId = String(action.options.itemId)
+				const itemId = optString(action.options.itemId)
 				const isActual = Boolean(action.options.isActual)
 				await deps.api.setPlanItemDurationActual(itemId, isActual)
 			}, deps),
@@ -523,7 +604,7 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 				},
 			],
 			callback: guarded(async (action) => {
-				const itemIds = String(action.options.itemIds)
+				const itemIds = optString(action.options.itemIds)
 					.split(',')
 					.map((s) => s.trim())
 					.filter(Boolean)
@@ -549,8 +630,8 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 				},
 			],
 			callback: guarded(async (action) => {
-				const text = String(action.options.text)
-				const title = String(action.options.title)
+				const text = optString(action.options.text)
+				const title = optString(action.options.title)
 				await deps.api.importPlan(text, title || undefined)
 			}, deps),
 		},
@@ -584,7 +665,7 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 				},
 			],
 			callback: guarded(async (action) => {
-				const serviceTypeId = String(action.options.serviceTypeId)
+				const serviceTypeId = optString(action.options.serviceTypeId)
 				await deps.api.selectPcoServiceType(serviceTypeId)
 			}, deps),
 		},
@@ -617,7 +698,7 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 				},
 			],
 			callback: guarded(async (action) => {
-				const filter = String(action.options.filter)
+				const filter = optString(action.options.filter)
 				await deps.api.setPcoPlanFilter(filter)
 			}, deps),
 		},
@@ -643,8 +724,8 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 				},
 			],
 			callback: guarded(async (action) => {
-				const serviceTypeId = String(action.options.serviceTypeId)
-				const planId = String(action.options.planId)
+				const serviceTypeId = optString(action.options.serviceTypeId)
+				const planId = optString(action.options.planId)
 				await deps.api.syncPco(serviceTypeId, planId)
 			}, deps),
 		},
@@ -690,8 +771,8 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 				},
 			],
 			callback: guarded(async (action) => {
-				const text = String(action.options.text)
-				const targetRoleId = String(action.options.targetRoleId)
+				const text = optString(action.options.text)
+				const targetRoleId = optString(action.options.targetRoleId)
 				const isHighPriority = Boolean(action.options.isHighPriority)
 				await deps.api.sendMessage({
 					text,
@@ -721,7 +802,7 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 				},
 			],
 			callback: guarded(async (action) => {
-				const mode = String(action.options.mode)
+				const mode = optString(action.options.mode)
 				await deps.api.setUiMode(mode)
 			}, deps),
 		},
@@ -737,7 +818,7 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 				},
 			],
 			callback: guarded(async (action) => {
-				const name = String(action.options.name)
+				const name = optString(action.options.name)
 				await deps.api.createRole(name)
 			}, deps),
 		},
@@ -766,9 +847,9 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 				},
 			],
 			callback: guarded(async (action) => {
-				const roleId = String(action.options.roleId)
-				const name = String(action.options.name)
-				const personName = String(action.options.personName)
+				const roleId = optString(action.options.roleId)
+				const name = optString(action.options.name)
+				const personName = optString(action.options.personName)
 
 				const body: Record<string, string> = {}
 				if (name) body.name = name
@@ -790,7 +871,7 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 				},
 			],
 			callback: guarded(async (action) => {
-				const roleId = String(action.options.roleId)
+				const roleId = optString(action.options.roleId)
 				await deps.api.deleteRole(roleId)
 			}, deps),
 		},
@@ -838,7 +919,7 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 				},
 			],
 			callback: guarded(async (action) => {
-				const ip = String(action.options.ip)
+				const ip = optString(action.options.ip)
 				await deps.api.networkPing(ip)
 			}, deps),
 		},
@@ -879,7 +960,7 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 				},
 			],
 			callback: guarded(async (action) => {
-				const hourFormatThreshold = String(action.options.hourFormatThreshold)
+				const hourFormatThreshold = optString(action.options.hourFormatThreshold)
 				await deps.api.updateSettings(hourFormatThreshold)
 			}, deps),
 		},
@@ -902,11 +983,362 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 			],
 			callback: guarded(async (action) => {
 				const enabled = Boolean(action.options.enabled)
-				const host = String(action.options.host)
+				const host = optString(action.options.host)
 				await deps.api.setRelay({
 					enabled,
 					host: host || undefined,
 				})
+			}, deps),
+		},
+
+		// MARK: - Projected / Actual
+
+		timerActualToggle: {
+			name: 'Toggle Projected/Actual (live item)',
+			description:
+				'Flips the live item between Projected and Actual. This is the transient override — it changes what the pagers show and is never written into the plan, so it goes stale as soon as a different item becomes active.',
+			options: [],
+			callback: guarded(async () => {
+				const timer = deps.state.timer
+				if (!timer) {
+					deps.log('warn', 'No active plan item to toggle Projected/Actual on.')
+					return
+				}
+				// Read the *displayed* value, not the plan item's own flag: an
+				// override may already be in force, and toggling against the plan
+				// would make the first press appear to do nothing.
+				await deps.api.timerActualOverride(!timer.isDurationActualForDisplay)
+			}, deps),
+		},
+
+		planToggleItemDurationActual: {
+			name: 'Toggle Projected/Actual (plan item)',
+			description:
+				"Flips a plan item's own Projected/Actual flag. Unlike the live override this persists — it is the item's real duration type, and it comes back next time the plan loads.",
+			options: [
+				{
+					type: 'dropdown',
+					id: 'itemId',
+					label: 'Plan Item (blank = the live item)',
+					choices: planItemChoices,
+					default: planItemChoices[0]?.id ?? '',
+					allowCustom: true,
+				},
+			],
+			callback: guarded(async (action) => {
+				const requested = optString(action.options.itemId)
+				const itemId = requested || deps.state.timer?.item.id
+				if (!itemId) {
+					deps.log('warn', 'No plan item selected and nothing is live.')
+					return
+				}
+				const item = deps.state.plan?.items.find((i) => i.id === itemId)
+				if (!item) {
+					deps.log('warn', `Plan item ${itemId} is not in the plan currently loaded.`)
+					return
+				}
+				await deps.api.setPlanItemDurationActual(itemId, !item.isDurationActual)
+			}, deps),
+		},
+
+		// MARK: - Notifications
+
+		dismissNotification: {
+			name: 'Dismiss Standing Notification',
+			description:
+				'Takes the lower third down on every pager. Leaves the message history intact — use Clear Messages to wipe that.',
+			options: [],
+			callback: guarded(async () => {
+				await deps.api.dismissNotification()
+			}, deps),
+		},
+
+		// MARK: - Waypoints
+
+		waypointGo: {
+			name: 'Go To Waypoint',
+			description:
+				'Jumps the service to whichever item carries this waypoint. Warns rather than fails silently when the waypoint is unassigned in this week\u2019s plan.',
+			options: [
+				{
+					type: 'dropdown',
+					id: 'waypoint',
+					label: 'Waypoint',
+					choices: waypointChoices,
+					default: waypointChoices[0]?.id ?? '',
+					// Custom allowed on purpose: a button is often authored
+					// against a waypoint name the producer hasn\u2019t created yet.
+					allowCustom: true,
+				},
+				{
+					type: 'checkbox',
+					id: 'startTimer',
+					label: 'Start the timer on arrival',
+					default: true,
+				},
+			],
+			callback: guarded(
+				async (action) => {
+					const ref = optString(action.options.waypoint)
+					await deps.api.fireWaypoint(ref, Boolean(action.options.startTimer))
+				},
+				deps,
+				explainWaypointFailure,
+			),
+		},
+
+		waypointAssign: {
+			name: 'Assign Waypoint To Item',
+			options: [
+				{
+					type: 'dropdown',
+					id: 'waypoint',
+					label: 'Waypoint',
+					choices: waypointChoices,
+					default: waypointChoices[0]?.id ?? '',
+					allowCustom: true,
+				},
+				{
+					type: 'dropdown',
+					id: 'itemId',
+					label: 'Plan Item (leave blank to unassign)',
+					choices: planItemChoices,
+					default: planItemChoices[0]?.id ?? '',
+					allowCustom: true,
+				},
+			],
+			callback: guarded(async (action) => {
+				const ref = optString(action.options.waypoint)
+				const itemId = optString(action.options.itemId)
+				await deps.api.assignWaypoint(ref, itemId || null)
+			}, deps),
+		},
+
+		waypointAssignToActiveItem: {
+			name: 'Assign Waypoint To Active Item',
+			description:
+				'Tags whatever item is live right now with this waypoint — the one-press way to build a waypoint set during a rehearsal.',
+			options: [
+				{
+					type: 'dropdown',
+					id: 'waypoint',
+					label: 'Waypoint',
+					choices: waypointChoices,
+					default: waypointChoices[0]?.id ?? '',
+					allowCustom: true,
+				},
+			],
+			callback: guarded(async (action) => {
+				const ref = optString(action.options.waypoint)
+				const activeId = deps.state.timer?.item.id
+				if (!activeId) {
+					deps.log('warn', 'No active plan item to assign a waypoint to.')
+					return
+				}
+				await deps.api.assignWaypoint(ref, activeId)
+			}, deps),
+		},
+
+		waypointCreate: {
+			name: 'Create Waypoint',
+			options: [
+				{
+					type: 'textinput',
+					id: 'name',
+					label: 'Name',
+					default: '',
+					useVariables: true,
+				},
+			],
+			callback: guarded(async (action) => {
+				const name = optString(action.options.name).trim()
+				if (!name) {
+					deps.log('warn', 'Create Waypoint needs a name.')
+					return
+				}
+				await deps.api.createWaypoint(name)
+			}, deps),
+		},
+
+		waypointRename: {
+			name: 'Rename Waypoint',
+			options: [
+				{
+					type: 'dropdown',
+					id: 'waypoint',
+					label: 'Waypoint',
+					choices: waypointChoices,
+					default: waypointChoices[0]?.id ?? '',
+					allowCustom: true,
+				},
+				{
+					type: 'textinput',
+					id: 'name',
+					label: 'New Name',
+					default: '',
+					useVariables: true,
+				},
+			],
+			callback: guarded(async (action) => {
+				const ref = optString(action.options.waypoint)
+				const name = optString(action.options.name).trim()
+				if (!name) {
+					deps.log('warn', 'Rename Waypoint needs a new name.')
+					return
+				}
+				await deps.api.updateWaypoint(ref, { name })
+			}, deps),
+		},
+
+		waypointDelete: {
+			name: 'Delete Waypoint',
+			options: [
+				{
+					type: 'dropdown',
+					id: 'waypoint',
+					label: 'Waypoint',
+					choices: waypointChoices,
+					default: waypointChoices[0]?.id ?? '',
+					allowCustom: true,
+				},
+			],
+			callback: guarded(async (action) => {
+				await deps.api.deleteWaypoint(optString(action.options.waypoint))
+			}, deps),
+		},
+
+		planSetItemWaypoints: {
+			name: 'Set Plan Item Waypoints',
+			description: 'Replaces the complete set of waypoints an item carries. Comma-separated names or slugs.',
+			options: [
+				{
+					type: 'dropdown',
+					id: 'itemId',
+					label: 'Plan Item',
+					choices: planItemChoices,
+					default: planItemChoices[0]?.id ?? '',
+					allowCustom: true,
+				},
+				{
+					type: 'textinput',
+					id: 'waypoints',
+					label: 'Waypoints (comma-separated, blank clears)',
+					default: '',
+					useVariables: true,
+				},
+			],
+			callback: guarded(async (action) => {
+				const itemId = optString(action.options.itemId)
+				const raw = optString(action.options.waypoints)
+				const waypoints = raw
+					.split(',')
+					.map((w: string) => w.trim())
+					.filter((w: string) => w.length > 0)
+				await deps.api.setPlanItemWaypoints(itemId, waypoints)
+			}, deps),
+		},
+
+		// MARK: - Service schedules
+
+		scheduleGoLive: {
+			name: 'Bring Schedule Live Now',
+			description: 'Loads a scheduled service immediately rather than waiting for its go-live time.',
+			options: [
+				{
+					type: 'dropdown',
+					id: 'scheduleId',
+					label: 'Schedule',
+					choices: scheduleChoices,
+					default: scheduleChoices[0]?.id ?? '',
+					allowCustom: true,
+				},
+			],
+			callback: guarded(async (action) => {
+				await deps.api.scheduleGoLive(optString(action.options.scheduleId))
+			}, deps),
+		},
+
+		scheduleGoLiveNext: {
+			name: 'Bring Next Schedule Live Now',
+			description: 'Whichever service the app says is next — no dropdown to keep current as schedules come and go.',
+			options: [],
+			callback: guarded(async () => {
+				const next = deps.state.nextSchedule
+				if (!next) {
+					deps.log('warn', 'No upcoming enabled schedule to bring live.')
+					return
+				}
+				await deps.api.scheduleGoLive(next.id)
+			}, deps),
+		},
+
+		scheduleSetEnabled: {
+			name: 'Enable/Disable Schedule',
+			options: [
+				{
+					type: 'dropdown',
+					id: 'scheduleId',
+					label: 'Schedule',
+					choices: scheduleChoices,
+					default: scheduleChoices[0]?.id ?? '',
+					allowCustom: true,
+				},
+				{
+					type: 'checkbox',
+					id: 'isEnabled',
+					label: 'Enabled',
+					default: true,
+				},
+			],
+			callback: guarded(async (action) => {
+				await deps.api.updateSchedule(optString(action.options.scheduleId), {
+					isEnabled: Boolean(action.options.isEnabled),
+				})
+			}, deps),
+		},
+
+		scheduleSetOffset: {
+			name: 'Set Schedule Lead Time',
+			description: 'How many minutes before the service start the app brings it up.',
+			options: [
+				{
+					type: 'dropdown',
+					id: 'scheduleId',
+					label: 'Schedule',
+					choices: scheduleChoices,
+					default: scheduleChoices[0]?.id ?? '',
+					allowCustom: true,
+				},
+				{
+					type: 'number',
+					id: 'minutes',
+					label: 'Lead time (minutes)',
+					default: 30,
+					min: 0,
+					max: 720,
+				},
+			],
+			callback: guarded(async (action) => {
+				await deps.api.updateSchedule(optString(action.options.scheduleId), {
+					goLiveOffsetMinutes: Number(action.options.minutes),
+				})
+			}, deps),
+		},
+
+		scheduleDelete: {
+			name: 'Delete Schedule',
+			options: [
+				{
+					type: 'dropdown',
+					id: 'scheduleId',
+					label: 'Schedule',
+					choices: scheduleChoices,
+					default: scheduleChoices[0]?.id ?? '',
+					allowCustom: true,
+				},
+			],
+			callback: guarded(async (action) => {
+				await deps.api.deleteSchedule(optString(action.options.scheduleId))
 			}, deps),
 		},
 	}

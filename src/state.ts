@@ -1,5 +1,5 @@
-import { parseTimerInput, previewText, signOf, withSign } from './timerEntry'
-import type { TimerEntrySign, TimerInputAction } from './timerEntry'
+import { formatDuration, parseTimerInput, previewText, signOf, withSign } from './timerEntry.js'
+import type { TimerEntrySign, TimerInputAction } from './timerEntry.js'
 import type {
 	ActiveTimer,
 	ControlAPIState,
@@ -10,11 +10,21 @@ import type {
 	PlanStatus,
 	PlotipharStatus,
 	RoleCue,
+	ScheduleEntry,
+	ScheduleStatus,
 	SettingsStatus,
-} from './types'
+	TimerSnapshot,
+	WaypointStatus,
+} from './types.js'
 
 /** What the app's own time-entry popover previews against when the socket hasn't said otherwise (`timeEntryPopover`'s default `hourFormatThreshold`). */
 const DEFAULT_HOUR_FORMAT_THRESHOLD = 'over90Minutes'
+
+/** Rows on the Rundown preset grid. */
+export const RUNDOWN_ROWS = 8
+
+/** A socket that has delivered nothing (not even a pong) for longer than this, while "connected", is stale. */
+export const STALE_AFTER_MS = 5000
 
 /** Turns a role name into a variable/preset-id-safe slug (lowercase, underscores). */
 export function slugify(text: string): string {
@@ -61,9 +71,56 @@ export class ModuleState {
 	 * same buffer no matter which page or which surface the keys are spread over.
 	 */
 	timerEntryBuffer = ''
+	/** Highest `rev` seen; `null` until the app sends one (older apps never do). */
+	rev: number | null = null
+	/** App clock minus this machine's clock, from the last stamped snapshot. */
+	serverOffsetMs = 0
+	lastFrameAt: number | null = null
+	/** Zero-based page of the Rundown rows. */
+	rundownPage = 0
 
-	applyState(state: ControlAPIState): void {
+	constructor(private clock: () => number = Date.now) {}
+
+	/** Drops the revision guard — for a `hello`/prime read, since a restarted app counts from the start again. */
+	resetRev(): void {
+		this.rev = null
+	}
+
+	private acceptRev(rev: number | undefined, serverNowMs: number | undefined): boolean {
+		if (typeof rev === 'number') {
+			if (this.rev !== null && rev < this.rev) return false
+			this.rev = rev
+		}
+		if (typeof serverNowMs === 'number') this.serverOffsetMs = serverNowMs - this.clock()
+		return true
+	}
+
+	/** Returns `false` (and keeps the held snapshot) when `state` is older than what's held. A snapshot without a `rev` is always accepted. */
+	applyState(state: ControlAPIState): boolean {
+		if (!this.acceptRev(state.rev, state.serverNowMs)) return false
 		this.snapshot = state
+		return true
+	}
+
+	/** Merges the slim `timer` event into the held snapshot. Ignored when older, or when there's no snapshot yet to merge into. */
+	applyTimer(event: TimerSnapshot): boolean {
+		if (!this.snapshot) return false
+		if (!this.acceptRev(event.rev, event.serverNowMs)) return false
+		this.snapshot = { ...this.snapshot, timer: event.timer }
+		return true
+	}
+
+	/** The app's idea of "now", corrected by the last offset it reported. */
+	get nowMs(): number {
+		return this.clock() + this.serverOffsetMs
+	}
+
+	markFrame(): void {
+		this.lastFrameAt = this.clock()
+	}
+
+	get isStale(): boolean {
+		return this.isSocketConnected && this.lastFrameAt !== null && this.clock() - this.lastFrameAt > STALE_AFTER_MS
 	}
 
 	applyMessage(message: InterTeamMessage): void {
@@ -72,6 +129,8 @@ export class ModuleState {
 
 	setSocketConnected(connected: boolean): void {
 		this.isSocketConnected = connected
+		if (!connected) this.lastFrameAt = null
+		else if (this.lastFrameAt === null) this.lastFrameAt = this.clock()
 	}
 
 	get roles(): RoleCue[] {
@@ -133,6 +192,75 @@ export class ModuleState {
 		return uniqueRoleSlugs(this.roles)
 	}
 
+	// MARK: - Waypoints
+
+	get waypoints(): WaypointStatus[] {
+		return this.snapshot?.waypoints ?? []
+	}
+
+	/** Resolves a waypoint by id or slug — the same two forms the API's own routes accept, so a button authored either way looks up the same here. */
+	waypointByRef(ref: string): WaypointStatus | undefined {
+		return this.waypoints.find((w) => w.id === ref || w.slug === ref)
+	}
+
+	/**
+	 * Whether a waypoint currently points at an item in the loaded plan.
+	 * `false` covers both "no such waypoint" and "exists but unassigned" — the
+	 * two cases that make `POST /waypoints/{ref}/go` answer 404 and 409
+	 * respectively, and the two a button should look dead for.
+	 */
+	isWaypointAssigned(ref: string): boolean {
+		const waypoint = this.waypointByRef(ref)
+		return waypoint?.itemId != null
+	}
+
+	/** Slugs, not ids, as the choice value: a preset authored against `sermon` keeps working across installs, where a UUID wouldn't. */
+	waypointChoices(): { id: string; label: string }[] {
+		return this.waypoints.map((w) => ({ id: w.slug, label: w.name }))
+	}
+
+	// MARK: - Service schedules
+
+	get schedules(): ScheduleStatus | null {
+		return this.snapshot?.schedules ?? null
+	}
+
+	get scheduleEntries(): ScheduleEntry[] {
+		return this.schedules?.entries ?? []
+	}
+
+	/** The next enabled schedule still ahead of now, as the app itself worked it out — never recomputed here, so the button and the app can't disagree about which service is next. */
+	get nextSchedule(): ScheduleEntry | undefined {
+		const nextId = this.schedules?.nextId
+		if (!nextId) return undefined
+		return this.scheduleEntries.find((e) => e.id === nextId)
+	}
+
+	scheduleById(id: string): ScheduleEntry | undefined {
+		return this.scheduleEntries.find((e) => e.id === id)
+	}
+
+	scheduleChoices(): { id: string; label: string }[] {
+		return this.scheduleEntries.map((e) => ({ id: e.id, label: e.title }))
+	}
+
+	// MARK: - Notifications
+
+	/**
+	 * Whether a message is still standing as a lower third on the pagers.
+	 * Mirrors `CueEngine.activeNotification(forRoleId:)` with no role filter:
+	 * the newest message counts unless the producer has dismissed since it
+	 * arrived. Recomputed from the snapshot rather than tracked separately so a
+	 * dismissal fired from the app itself lands here too.
+	 */
+	get hasStandingNotification(): boolean {
+		const newest = this.snapshot?.messages[0]
+		if (!newest) return false
+		const clearedAt = this.snapshot?.notificationsClearedAt
+		if (!clearedAt) return true
+		return new Date(newest.timestamp).getTime() > new Date(clearedAt).getTime()
+	}
+
 	// MARK: - Timer entry keypad
 
 	/** A digit, `h`/`m`/`s`, or `:` — the keys that just append. */
@@ -166,12 +294,106 @@ export class ModuleState {
 
 	/**
 	 * The preview line: what the active item's remaining time would read as if
-	 * the buffer were committed right now, in the app's own format. Read against
-	 * the live countdown, so a relative entry's preview keeps up with a running
-	 * timer between pushes; empty whenever there's nothing to preview.
+	 * the buffer were committed right now, in the app's own format. Computed from
+	 * the last pushed countdown value, so it only moves when a push arrives; blank
+	 * whenever there's nothing to preview (including a relative entry with no
+	 * active timer).
 	 */
 	get timerEntryPreview(): string {
 		const threshold = this.settings?.hourFormatThreshold ?? DEFAULT_HOUR_FORMAT_THRESHOLD
-		return previewText(this.timerEntryBuffer, this.timer?.remainingSeconds ?? 0, threshold)
+		const timer = this.timer
+		return previewText(
+			this.timerEntryBuffer,
+			timer ? timer.remainingSeconds : null,
+			threshold,
+			timer?.item?.elapsedSeconds ?? 0,
+		)
+	}
+
+	// MARK: - Timing projections
+
+	formatSeconds(seconds: number): string {
+		return formatDuration(seconds, this.settings?.hourFormatThreshold ?? DEFAULT_HOUR_FORMAT_THRESHOLD)
+	}
+
+	/** Seconds from now until the plan ends: what's left on the live item (overtime counts as 0) plus every item after it. `null` without a live timer. */
+	get serviceRemainingSeconds(): number | null {
+		const timer = this.timer
+		const plan = this.plan
+		if (!timer || !plan) return null
+		const after = plan.items.slice(plan.activeItemIndex + 1).reduce((sum, item) => sum + item.lengthInSeconds, 0)
+		return Math.max(0, timer.remainingSeconds) + after
+	}
+
+	/** Epoch ms the plan is projected to end, on the app's clock. */
+	get projectedEndMs(): number | null {
+		const remaining = this.serviceRemainingSeconds
+		return remaining === null ? null : this.nowMs + remaining * 1000
+	}
+
+	/** `HH:MM` in this machine's local time. */
+	get projectedEndText(): string {
+		const end = this.projectedEndMs
+		if (end === null) return ''
+		const date = new Date(end)
+		return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+	}
+
+	/** Signed projected end minus (next schedule's start + the plan's total length): `+` is running over. Blank without a schedule or a live timer. */
+	get serviceOverUnderText(): string {
+		const end = this.projectedEndMs
+		const schedule = this.nextSchedule
+		const plan = this.plan
+		if (end === null || !schedule || !plan) return ''
+		const startsAt = new Date(schedule.startsAt).getTime()
+		if (Number.isNaN(startsAt)) return ''
+		const planned = plan.items.reduce((sum, item) => sum + item.lengthInSeconds, 0)
+		const delta = Math.round((end - (startsAt + planned * 1000)) / 1000)
+		return `${delta < 0 ? '-' : '+'}${this.formatSeconds(Math.abs(delta))}`
+	}
+
+	/** Elapsed over length for the live item, as an integer 0-100. */
+	get activeItemProgressPct(): number {
+		const item = this.timer?.item
+		if (!item || !(item.lengthInSeconds > 0)) return 0
+		return Math.max(0, Math.min(100, Math.round((item.elapsedSeconds / item.lengthInSeconds) * 100)))
+	}
+
+	// MARK: - Rundown paging
+
+	get rundownPageCount(): number {
+		return Math.max(1, Math.ceil((this.plan?.items.length ?? 0) / RUNDOWN_ROWS))
+	}
+
+	/** The held page, clamped — the plan can shrink under it mid-service. */
+	get rundownPageIndex(): number {
+		return Math.max(0, Math.min(this.rundownPage, this.rundownPageCount - 1))
+	}
+
+	pageRundown(delta: number): void {
+		this.rundownPage = Math.max(0, Math.min(this.rundownPageIndex + delta, this.rundownPageCount - 1))
+	}
+
+	/** Item shown on row `row` (1-based) of the current page. */
+	rundownRow(row: number): PCOTimerItem | undefined {
+		return this.plan?.items[this.rundownPageIndex * RUNDOWN_ROWS + row - 1]
+	}
+
+	isRundownRowActive(row: number): boolean {
+		const plan = this.plan
+		if (!plan) return false
+		return this.rundownPageIndex * RUNDOWN_ROWS + row - 1 === plan.activeItemIndex && !!this.rundownRow(row)
+	}
+
+	// MARK: - Definition signature
+
+	/** Everything the action/feedback/variable/preset *definitions* are built from — when this string is unchanged, rebuilding them would change nothing. */
+	dynamicSignature(): string {
+		return JSON.stringify([
+			this.roles.map((r) => [r.id, r.name]),
+			(this.plan?.items ?? []).map((i) => [i.id, i.title, i.lengthInSeconds]),
+			this.waypoints.map((w) => [w.id, w.slug, w.name]),
+			this.scheduleEntries.map((e) => [e.id, e.title]),
+		])
 	}
 }

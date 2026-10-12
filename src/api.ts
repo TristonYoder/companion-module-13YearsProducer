@@ -20,12 +20,33 @@ import type {
 	RoleUpdateBody,
 	SettingsStatus,
 	ServerEvent,
+	StartTimerBody,
 	TimerRemainingBody,
-} from './types'
+	TimerSnapshot,
+	PlanItemWaypointsBody,
+	ScheduleCreateBody,
+	ScheduleEntry,
+	ScheduleStatus,
+	ScheduleUpdateBody,
+	WaypointAssignBody,
+	WaypointCreateBody,
+	WaypointFireBody,
+	WaypointStatus,
+	WaypointUpdateBody,
+} from './types.js'
 
 export interface ResolvedApiConfig {
 	host: string
 	port: number
+}
+
+const REQUEST_TIMEOUT_MS = 3000
+
+/** A command reply that is the whole state rather than just its own section. */
+function isFullSnapshot(value: unknown): value is ControlAPIState {
+	return (
+		typeof value === 'object' && value !== null && 'roles' in value && 'plan' in value && 'selectedRoleIds' in value
+	)
 }
 
 export class ApiError extends Error {
@@ -48,7 +69,11 @@ export class ApiError extends Error {
  * section, matching what the router actually sends back — see per-method notes.
  */
 export class ControlApi {
-	constructor(private getConfig: () => ResolvedApiConfig) {}
+	/** `onSnapshot` is handed every full-state reply to a command, so the module can apply it without waiting for the socket's push. */
+	constructor(
+		private getConfig: () => ResolvedApiConfig,
+		private onSnapshot?: (snapshot: ControlAPIState) => void,
+	) {}
 
 	private get baseUrl(): string {
 		const { host, port } = this.getConfig()
@@ -61,6 +86,7 @@ export class ControlApi {
 		try {
 			res = await fetch(url, {
 				...init,
+				signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
 				headers: {
 					'Content-Type': 'application/json',
 					...init?.headers,
@@ -97,7 +123,9 @@ export class ControlApi {
 	}
 
 	private async send<T>(method: string, path: string, body?: unknown): Promise<T> {
-		return this.request<T>(path, { method, body: body === undefined ? undefined : JSON.stringify(body) })
+		const result = await this.request<T>(path, { method, body: body === undefined ? undefined : JSON.stringify(body) })
+		if (isFullSnapshot(result)) this.onSnapshot?.(result)
+		return result
 	}
 
 	// MARK: Health & State
@@ -109,6 +137,11 @@ export class ControlApi {
 	/** The only place this module ever calls this — on connect, to prime state before the WebSocket's own `hello` arrives. Every other read comes from WebSocket pushes; this module does not poll. */
 	async getState(): Promise<ControlAPIState> {
 		return this.get('/state')
+	}
+
+	/** The timer alone — the slim shape of the socket's `timer` event. */
+	async getTimer(): Promise<TimerSnapshot> {
+		return this.get('/timer')
 	}
 
 	// MARK: Roles & selection
@@ -194,12 +227,13 @@ export class ControlApi {
 		return this.get('/plan')
 	}
 
-	async planNext(): Promise<ControlAPIState> {
-		return this.send('POST', '/plan/next')
+	/** Without `startTimer` no body is sent, which is the app's own default behaviour. */
+	async planNext(startTimer?: boolean): Promise<ControlAPIState> {
+		return this.send('POST', '/plan/next', startTimerBody(startTimer))
 	}
 
-	async planPrevious(): Promise<ControlAPIState> {
-		return this.send('POST', '/plan/previous')
+	async planPrevious(startTimer?: boolean): Promise<ControlAPIState> {
+		return this.send('POST', '/plan/previous', startTimerBody(startTimer))
 	}
 
 	/** 202 — loads asynchronously from Planning Center; watch for a later `state` push. 409s if no PCO-synced plan is active. */
@@ -381,18 +415,123 @@ export class ControlApi {
 	async setRelay(body: { enabled?: boolean; host?: string }): Promise<ControlAPIState> {
 		return this.send('PUT', '/relay', body)
 	}
+
+	// MARK: Notifications
+
+	/**
+	 * Takes the standing lower third down on every pager without touching a
+	 * word of the history — the counterpart to `clearMessages()`, which wipes
+	 * the history itself. This is what a producer reaches for once the host has
+	 * visibly read the message.
+	 */
+	async dismissNotification(): Promise<ControlAPIState> {
+		return this.send('POST', '/messages/dismiss')
+	}
+
+	// MARK: Waypoints
+	//
+	// Every `ref` below is a waypoint id *or* its slug — the router resolves
+	// either, which is what lets a preset button be authored against a stable
+	// human name ("sermon") rather than a UUID that changes per install.
+
+	async listWaypoints(): Promise<WaypointStatus[]> {
+		return this.get('/waypoints')
+	}
+
+	async createWaypoint(name: string): Promise<WaypointStatus> {
+		return this.send('POST', '/waypoints', { name } satisfies WaypointCreateBody)
+	}
+
+	async getWaypoint(ref: string): Promise<WaypointStatus> {
+		return this.get(`/waypoints/${encodeURIComponent(ref)}`)
+	}
+
+	async updateWaypoint(ref: string, body: WaypointUpdateBody): Promise<WaypointStatus> {
+		return this.send('PATCH', `/waypoints/${encodeURIComponent(ref)}`, body)
+	}
+
+	async deleteWaypoint(ref: string): Promise<WaypointStatus[]> {
+		return this.send('DELETE', `/waypoints/${encodeURIComponent(ref)}`)
+	}
+
+	/**
+	 * Jumps the service to whatever item carries this waypoint.
+	 *
+	 * Throws `ApiError` 404 when no such waypoint exists and 409 when it exists
+	 * but nothing in the loaded plan carries it — a split the app makes on
+	 * purpose, so callers should surface the two differently rather than
+	 * collapsing them into "didn't work".
+	 */
+	async fireWaypoint(ref: string, startTimer?: boolean): Promise<ControlAPIState> {
+		const body: WaypointFireBody | undefined = startTimer === undefined ? undefined : { startTimer }
+		return this.send('POST', `/waypoints/${encodeURIComponent(ref)}/go`, body)
+	}
+
+	/** Jumps to the next waypoint ahead of the live item. 409s when there is none. */
+	async waypointNext(startTimer?: boolean): Promise<ControlAPIState> {
+		return this.send('POST', '/waypoints/next', startTimerBody(startTimer))
+	}
+
+	/** Points a waypoint at a plan item, or unassigns it when `itemId` is null. */
+	async assignWaypoint(ref: string, itemId: string | null): Promise<WaypointStatus> {
+		return this.send('POST', `/waypoints/${encodeURIComponent(ref)}/assign`, { itemId } satisfies WaypointAssignBody)
+	}
+
+	/** Replaces the complete set of waypoints a plan item carries. */
+	async setPlanItemWaypoints(itemId: string, waypoints: string[]): Promise<PlanStatus> {
+		return this.send('POST', `/plan/items/${encodeURIComponent(itemId)}/waypoints`, {
+			waypoints,
+		} satisfies PlanItemWaypointsBody)
+	}
+
+	// MARK: Service schedules
+
+	async listSchedules(): Promise<ScheduleStatus> {
+		return this.get('/schedules')
+	}
+
+	async createSchedule(body: ScheduleCreateBody): Promise<ScheduleStatus> {
+		return this.send('POST', '/schedules', body)
+	}
+
+	async getSchedule(id: string): Promise<ScheduleEntry> {
+		return this.get(`/schedules/${encodeURIComponent(id)}`)
+	}
+
+	async updateSchedule(id: string, body: ScheduleUpdateBody): Promise<ScheduleEntry> {
+		return this.send('PATCH', `/schedules/${encodeURIComponent(id)}`, body)
+	}
+
+	async deleteSchedule(id: string): Promise<ScheduleStatus> {
+		return this.send('DELETE', `/schedules/${encodeURIComponent(id)}`)
+	}
+
+	/** Brings a scheduled service up right now, without waiting for its go-live time. */
+	async scheduleGoLive(id: string): Promise<ControlAPIState> {
+		return this.send('POST', `/schedules/${encodeURIComponent(id)}/go-live`)
+	}
+}
+
+function startTimerBody(startTimer: boolean | undefined): StartTimerBody | undefined {
+	return startTimer === undefined ? undefined : { startTimer }
 }
 
 export interface ControlSocketHandlers {
 	onHello?: (state: ControlAPIState) => void
 	onState?: (state: ControlAPIState) => void
 	onMessage?: (message: InterTeamMessage) => void
+	onTimer?: (timer: TimerSnapshot) => void
+	/** Any inbound traffic at all, pongs included — proof the link is alive. */
+	onFrame?: () => void
 	onOpen?: () => void
 	onClose?: (reason: string) => void
 	onError?: (err: Error) => void
 }
 
 const RECONNECT_DELAY_MS = 3000
+const PING_INTERVAL_MS = 5000
+/** No frame or pong for this long and the socket is treated as half-open (e.g. the Mac slept) and torn down. */
+const PONG_DEADLINE_MS = 12000
 
 /**
  * The WebSocket half of the Control API — `ws://host:port/v1/socket`. This is
@@ -411,6 +550,8 @@ export class ControlSocket {
 	private closedByUser = false
 	private pending = new Map<string, { resolve: (reply: CommandReply) => void; reject: (err: Error) => void }>()
 	private nextCommandId = 1
+	private keepaliveTimer: ReturnType<typeof setInterval> | undefined
+	private lastInboundAt = 0
 
 	constructor(
 		private getConfig: () => ResolvedApiConfig,
@@ -432,6 +573,7 @@ export class ControlSocket {
 			clearTimeout(this.reconnectTimer)
 			this.reconnectTimer = undefined
 		}
+		this.stopKeepalive()
 		this.ws?.close()
 		this.ws = undefined
 		for (const { reject } of this.pending.values()) reject(new Error('Socket closed'))
@@ -458,14 +600,22 @@ export class ControlSocket {
 		this.ws = ws
 
 		ws.on('open', () => {
+			this.startKeepalive(ws)
 			this.handlers.onOpen?.()
 		})
 
 		ws.on('message', (data: WebSocket.RawData) => {
+			this.noteInbound()
 			this.handleMessage(rawDataToString(data))
 		})
 
+		ws.on('pong', () => {
+			this.noteInbound()
+		})
+
 		ws.on('close', () => {
+			if (this.ws !== ws) return
+			this.stopKeepalive()
 			this.handlers.onClose?.('closed')
 			this.scheduleReconnect()
 		})
@@ -473,6 +623,33 @@ export class ControlSocket {
 		ws.on('error', (err: Error) => {
 			this.handlers.onError?.(err)
 		})
+	}
+
+	private noteInbound(): void {
+		this.lastInboundAt = Date.now()
+		this.handlers.onFrame?.()
+	}
+
+	private startKeepalive(ws: WebSocket): void {
+		this.stopKeepalive()
+		this.lastInboundAt = Date.now()
+		this.keepaliveTimer = setInterval(() => {
+			if (Date.now() - this.lastInboundAt > PONG_DEADLINE_MS) {
+				this.handlers.onError?.(new Error('No reply to keepalive — reconnecting'))
+				ws.terminate()
+				return
+			}
+			try {
+				ws.ping()
+			} catch {
+				ws.terminate()
+			}
+		}, PING_INTERVAL_MS)
+	}
+
+	private stopKeepalive(): void {
+		if (this.keepaliveTimer) clearInterval(this.keepaliveTimer)
+		this.keepaliveTimer = undefined
 	}
 
 	private handleMessage(raw: string): void {
@@ -503,6 +680,9 @@ export class ControlSocket {
 					return
 				case 'message':
 					this.handlers.onMessage?.(parsed.data)
+					return
+				case 'timer':
+					this.handlers.onTimer?.(parsed.data)
 					return
 			}
 		}

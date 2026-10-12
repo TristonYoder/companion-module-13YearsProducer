@@ -12,29 +12,38 @@
 //     ActiveTimer wrapper) carries a precomputed `remainingSeconds`/
 //     `isOvertime`/`formattedRemaining` for the one item that's actually running.
 
+// Resolved divergences (both now corrected in CONTROL-API.md itself):
+//   - `PATCH /v1/settings` was documented as taking `under1Hour`/`over1Hour`.
+//     The enum has only `over60Minutes`, `over90Minutes`, `never`.
+//   - The cue routes were once documented as accepting `RESET`; `CueState` has
+//     never had it, and `FLASH_STANDBY`/`FLASH_GO` have since been removed from
+//     the enum outright.
+
 // MARK: - Cue state
 
-/** `CueState` raw values (Sources/Shared/Models/CueState.swift) — always uppercase on the wire. */
-export type CueStateValue = 'OFF' | 'STANDBY' | 'GO' | 'FLASH_STANDBY' | 'FLASH_GO'
-
-export const CUE_STATES: CueStateValue[] = ['OFF', 'STANDBY', 'GO', 'FLASH_STANDBY', 'FLASH_GO']
-
 /**
- * Every state a cue-firing route (`roles.{id}.cue`, `cues.selected`) accepts.
- * CONTROL-API.md's route table says "GO, STANDBY, RESET" for these two routes,
- * but `CueState` (the Swift enum the router actually decodes into) has no
- * `RESET` case at all — sending it 400s. The code wins: this app's own
- * "clear a cue" gesture posts `OFF`, and `cues.clear` (a distinct route) is
- * the bulk equivalent.
+ * `CueState` raw values (Sources/Shared/Models/CueState.swift) — always
+ * uppercase on the wire.
+ *
+ * `FLASH_STANDBY`/`FLASH_GO` used to be here and are deliberately gone: the
+ * app removed both cases outright, so the router's `CueState(rawValue:)` now
+ * returns nil for them and every route that takes a cue state answers
+ * 400 "Unknown cue state". Offering them in a dropdown was offering two
+ * buttons that could only ever fail. The web pager still *reads* them
+ * defensively (pager.html maps each to its base state) so historical data
+ * renders, but nothing accepts them as input any more.
  */
-export const FIRABLE_CUE_STATES: CueStateValue[] = ['OFF', 'STANDBY', 'GO', 'FLASH_STANDBY', 'FLASH_GO']
+export type CueStateValue = 'OFF' | 'STANDBY' | 'GO'
+
+export const CUE_STATES: CueStateValue[] = ['OFF', 'STANDBY', 'GO']
+
+/** Every state a cue-firing route (`roles.{id}.cue`, `cues.selected`) accepts. `cues.clear` is the bulk equivalent of firing `OFF` at everything. */
+export const FIRABLE_CUE_STATES: CueStateValue[] = ['OFF', 'STANDBY', 'GO']
 
 export const CUE_STATE_LABELS: Record<CueStateValue, string> = {
 	OFF: 'Clear',
 	STANDBY: 'Standby',
 	GO: 'Go!',
-	FLASH_STANDBY: 'Standby (Flash)',
-	FLASH_GO: 'Go! (Flash)',
 }
 
 /** RGB triples lifted verbatim from CueState.swift's `color`/`textColor` so a Companion button matches the app's own screen. */
@@ -42,33 +51,19 @@ export const CUE_STATE_COLOR: Record<CueStateValue, [number, number, number]> = 
 	OFF: [20, 26, 38],
 	STANDBY: [245, 184, 38],
 	GO: [38, 199, 89],
-	FLASH_STANDBY: [245, 184, 38],
-	FLASH_GO: [38, 199, 89],
 }
 
 export const CUE_STATE_TEXT_COLOR: Record<CueStateValue, [number, number, number]> = {
 	OFF: [255, 255, 255],
 	STANDBY: [26, 26, 26],
 	GO: [255, 255, 255],
-	FLASH_STANDBY: [26, 26, 26],
-	FLASH_GO: [255, 255, 255],
 }
 
-/**
- * The three-step toggle a single template button cycles through on repeated
- * presses: Standby → Go! → Clear → Standby → … The two FLASH_* states are
- * deliberately not steps in this cycle (a toggle button only ever needs one
- * state per stop) — a role currently flashing is treated as whichever base
- * state it's flashing (`FLASH_STANDBY` advances like `STANDBY`, `FLASH_GO`
- * like `GO`) so a flashing cue still toggles forward sensibly instead of
- * getting stuck.
- */
+/** The three-step toggle a single template button cycles through on repeated presses: Standby → Go! → Clear → Standby → … */
 export const CUE_CYCLE_NEXT: Record<CueStateValue, CueStateValue> = {
 	OFF: 'STANDBY',
 	STANDBY: 'GO',
 	GO: 'OFF',
-	FLASH_STANDBY: 'GO',
-	FLASH_GO: 'OFF',
 }
 
 /** What a toggle button should fire next, given a role's current cue state — the same lookup `CUE_CYCLE_NEXT` is, exposed as a function so callers don't have to know it's a plain object. */
@@ -232,6 +227,62 @@ export interface SettingsStatus {
 	connectedAPIClients: number
 }
 
+/**
+ * A named bookmark pointing at whatever item in *this week's* plan carries it
+ * — "sermon", "offering" — so a Companion button can be authored once against
+ * a stable name and keep working when next week's plan renumbers everything.
+ *
+ * `itemId` is null when the waypoint exists in the library but nothing in the
+ * loaded plan carries it. That distinction is the whole reason this is worth a
+ * feedback: firing an unassigned waypoint answers 409, not 404, so an operator
+ * can tell "I typo'd the name" from "nobody tagged this week's plan yet" —
+ * and a button that paints itself dark beforehand saves finding out by pressing.
+ */
+export interface WaypointStatus {
+	id: string
+	name: string
+	/** URL/wire-safe form of `name` — what a button should be pointed at, since it survives spaces and punctuation in a path. Routes accept either this or `id`. */
+	slug: string
+	itemId: string | null
+	itemTitle: string | null
+	itemIndex: number | null
+}
+
+export interface ScheduleEntry {
+	id: string
+	title: string
+	/** ISO-8601. */
+	startsAt: string
+	/** ISO-8601 — `startsAt` minus the lead time, precomputed by the app so a client never does date arithmetic. */
+	goLiveAt: string
+	goLiveOffsetSeconds: number
+	goLiveOffsetMinutes: number
+	pcoServiceTypeId: string | null
+	pcoPlanId: string | null
+	recurrence: string
+	isEnabled: boolean
+	/** ISO-8601, or null if it has never fired. */
+	lastFiredAt: string | null
+}
+
+export interface ScheduleStatus {
+	entries: ScheduleEntry[]
+	/** The next enabled schedule still ahead of now. */
+	nextId: string | null
+}
+
+/**
+ * `ServiceSchedule.Recurrence` raw values — the enum has exactly these two.
+ * There is no daily or monthly: anything else is a 400 from the create/update
+ * routes. A `once` schedule stamps `lastFiredAt` and disables itself after
+ * firing; a `weekly` one rolls `startsAt` forward by calendar day and stays
+ * armed.
+ */
+export const SCHEDULE_RECURRENCES: { id: string; label: string }[] = [
+	{ id: 'once', label: 'One time' },
+	{ id: 'weekly', label: 'Weekly' },
+]
+
 export interface ControlAPIState {
 	appMode: string
 	network: NetworkStatus
@@ -241,9 +292,32 @@ export interface ControlAPIState {
 	timer: ActiveTimer | null
 	plan: PlanStatus
 	messages: InterTeamMessage[]
+	/**
+	 * When the producer last dismissed the standing notification, or null if
+	 * one is standing (or none ever has). A message newer than this is still
+	 * showing as a lower third on the pagers — see `ModuleState.hasStandingNotification`.
+	 */
+	notificationsClearedAt: string | null
 	pco: PCOStatus
 	plotiphar: PlotipharStatus
 	settings: SettingsStatus
+	waypoints: WaypointStatus[]
+	schedules: ScheduleStatus
+	/** Monotonic revision of the app's state — absent from older app versions. */
+	rev?: number
+	/** The app's wall clock (epoch ms) when this snapshot was taken — absent from older app versions. */
+	serverNowMs?: number
+}
+
+/** Slim payload of the `timer` event and `GET /v1/timer`: the timer alone, with the same revision stamp as a full snapshot. */
+export interface TimerSnapshot {
+	rev?: number
+	serverNowMs?: number
+	timer: ActiveTimer | null
+}
+
+export interface StartTimerBody {
+	startTimer: boolean
 }
 
 export interface HealthInfo {
@@ -277,7 +351,12 @@ export interface MessageEvent {
 	data: InterTeamMessage
 }
 
-export type ServerEvent = HelloEvent | StateEvent | MessageEvent
+export interface TimerEvent {
+	event: 'timer'
+	data: TimerSnapshot
+}
+
+export type ServerEvent = HelloEvent | StateEvent | MessageEvent | TimerEvent
 
 /** Client-to-server command envelope. `op` is the dotted form of a REST path (`plan.next`, `roles.{id}.cue`). */
 export interface CommandEnvelope {
@@ -328,4 +407,66 @@ export interface MessageBody {
 export interface TimerRemainingBody {
 	seconds?: number
 	input?: string
+}
+
+export interface WaypointCreateBody {
+	name: string
+}
+
+export interface WaypointUpdateBody {
+	name?: string
+}
+
+export interface WaypointAssignBody {
+	/** Omit or send null to unassign the waypoint from whatever it currently points at. */
+	itemId?: string | null
+}
+
+export interface WaypointFireBody {
+	/** Defaults to true server-side: firing a waypoint does what tapping its row does, clock included. False pre-rolls to the cue without starting it. */
+	startTimer?: boolean
+}
+
+export interface PlanItemWaypointsBody {
+	/** The complete set of waypoints this item carries, by id or slug — replaces whatever it had. */
+	waypoints: string[]
+}
+
+export interface ScheduleCreateBody {
+	title: string
+	/** ISO-8601. */
+	startsAt: string
+	/** Two spellings of the same lead time; minutes wins if both are sent, and minutes is how a producer thinks about it ("thirty minutes before"). */
+	goLiveOffsetSeconds?: number
+	goLiveOffsetMinutes?: number
+	pcoServiceTypeId?: string
+	pcoPlanId?: string
+	recurrence?: string
+	isEnabled?: boolean
+}
+
+export interface ScheduleUpdateBody {
+	title?: string
+	startsAt?: string
+	goLiveOffsetSeconds?: number
+	goLiveOffsetMinutes?: number
+	pcoServiceTypeId?: string
+	pcoPlanId?: string
+	recurrence?: string
+	isEnabled?: boolean
+}
+
+/**
+ * Narrows an option value before stringifying it.
+ *
+ * Companion 2.x types option values as `JsonValue`, which includes objects and
+ * arrays — `String(someObject)` would quietly produce "[object Object]" and
+ * send that to the API as a role id. This makes the non-scalar case an empty
+ * string instead, which every call site already treats as "not set".
+ */
+export function optString(value: unknown): string {
+	if (value === null || value === undefined) return ''
+	if (typeof value === 'string') return value
+	if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+	return ''
 }

@@ -11,9 +11,8 @@
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 
-const { formatDuration, parseTimerInput, previewText, resolvedSeconds, signOf, withSign } = await import(
-	'../dist/timerEntry.js'
-)
+const { formatDuration, parseTimerInput, previewText, resolvedSeconds, signOf, withSign } =
+	await import('../dist/timerEntry.js')
 const { ModuleState } = await import('../dist/state.js')
 
 const absolute = (seconds) => ({ kind: 'setAbsolute', seconds })
@@ -106,6 +105,12 @@ describe('resolvedSeconds', () => {
 		assert.equal(resolvedSeconds(relative(-120), 600), 480)
 	})
 
+	test('a relative entry floors at minus elapsed (the item length hits 0), not at zero remaining', () => {
+		assert.equal(resolvedSeconds(relative(-60), 20, 300), -40)
+		assert.equal(resolvedSeconds(relative(-600), 20, 300), -300)
+		assert.equal(resolvedSeconds(relative(30), -100, 300), -70)
+	})
+
 	test('clamps at zero rather than going negative', () => {
 		assert.equal(resolvedSeconds(relative(-900), 600), 0)
 		assert.equal(resolvedSeconds(absolute(-5), 600), 0)
@@ -127,6 +132,15 @@ describe('previewText', () => {
 		// overtime — nothing to do with subtracting. The magnitude is what gets
 		// formatted here, so "-5m" must not come out as "+05:00".
 		assert.equal(previewText('-5m', 600, 'over90Minutes'), '-05:00\n= 05:00')
+	})
+
+	test('an overtime item can be nudged further into overtime', () => {
+		assert.equal(previewText('-60s', 20, 'over90Minutes', 300), '-01:00\n= +00:40')
+	})
+
+	test('a relative entry with no active timer previews blank; an absolute one still shows', () => {
+		assert.equal(previewText('+30s', null, 'over90Minutes'), '')
+		assert.equal(previewText('2m3s', null, 'over90Minutes'), '02:03')
 	})
 
 	test('a relative entry that would go past zero lands at zero, like the popover', () => {
@@ -221,13 +235,21 @@ describe('ModuleState timer entry buffer', () => {
 		assert.equal(state.timerEntryPreview, '1:00:00')
 	})
 
-	test('a relative entry with no timer running previews against zero, clamped', () => {
+	test('a relative entry with no active timer previews blank', () => {
 		const state = new ModuleState()
 		state.appendTimerEntry('-')
 		state.appendTimerEntry('3')
 		state.appendTimerEntry('0')
-		// "-" typed as a plain key (not via the sign action) still reads as a
-		// relative entry — the grammar is the same either way.
-		assert.equal(state.timerEntryPreview, '-00:30\n= 00:00')
+		assert.equal(state.timerEntryPreview, '')
+	})
+
+	test('the preview uses the live item’s elapsed time as the overtime floor', () => {
+		const state = new ModuleState()
+		state.applyState({
+			timer: { remainingSeconds: 20, item: { elapsedSeconds: 300 } },
+			settings: { hourFormatThreshold: 'over90Minutes' },
+		})
+		for (const key of ['-', '6', '0', 's']) state.appendTimerEntry(key)
+		assert.equal(state.timerEntryPreview, '-01:00\n= +00:40')
 	})
 })

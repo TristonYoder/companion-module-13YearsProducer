@@ -35,7 +35,15 @@ function snapshot(overrides = {}) {
 		roles: [],
 		selectedRoleIds: [],
 		timer: null,
-		plan: { title: null, items: [], activeItemIndex: 0, isAtEndOfPlan: false, canLoadNextService: false, pcoServiceTypeId: null, pcoPlanId: null },
+		plan: {
+			title: null,
+			items: [],
+			activeItemIndex: 0,
+			isAtEndOfPlan: false,
+			canLoadNextService: false,
+			pcoServiceTypeId: null,
+			pcoPlanId: null,
+		},
 		messages: [],
 		pco: {
 			isConnected: false,
@@ -119,19 +127,79 @@ describe('ModuleState', () => {
 	test('nextPlanItem returns the item after the active index, or undefined at the end', () => {
 		const state = new ModuleState()
 		const items = [
-			{ id: 'a', title: 'Welcome', itemType: 'Item', sequence: 1, lengthInSeconds: 60, elapsedSeconds: 0, isRunning: false, servicePlanTitle: null, notes: {}, noteIds: {}, pcoServiceTypeId: null, pcoPlanId: null, isDurationActual: false },
-			{ id: 'b', title: 'Worship', itemType: 'Song', sequence: 2, lengthInSeconds: 240, elapsedSeconds: 0, isRunning: false, servicePlanTitle: null, notes: {}, noteIds: {}, pcoServiceTypeId: null, pcoPlanId: null, isDurationActual: false },
+			{
+				id: 'a',
+				title: 'Welcome',
+				itemType: 'Item',
+				sequence: 1,
+				lengthInSeconds: 60,
+				elapsedSeconds: 0,
+				isRunning: false,
+				servicePlanTitle: null,
+				notes: {},
+				noteIds: {},
+				pcoServiceTypeId: null,
+				pcoPlanId: null,
+				isDurationActual: false,
+			},
+			{
+				id: 'b',
+				title: 'Worship',
+				itemType: 'Song',
+				sequence: 2,
+				lengthInSeconds: 240,
+				elapsedSeconds: 0,
+				isRunning: false,
+				servicePlanTitle: null,
+				notes: {},
+				noteIds: {},
+				pcoServiceTypeId: null,
+				pcoPlanId: null,
+				isDurationActual: false,
+			},
 		]
-		state.applyState(snapshot({ plan: { title: 'Sunday', items, activeItemIndex: 0, isAtEndOfPlan: false, canLoadNextService: false, pcoServiceTypeId: null, pcoPlanId: null } }))
+		state.applyState(
+			snapshot({
+				plan: {
+					title: 'Sunday',
+					items,
+					activeItemIndex: 0,
+					isAtEndOfPlan: false,
+					canLoadNextService: false,
+					pcoServiceTypeId: null,
+					pcoPlanId: null,
+				},
+			}),
+		)
 		assert.equal(state.nextPlanItem().id, 'b')
 
-		state.applyState(snapshot({ plan: { title: 'Sunday', items, activeItemIndex: 1, isAtEndOfPlan: true, canLoadNextService: false, pcoServiceTypeId: null, pcoPlanId: null } }))
+		state.applyState(
+			snapshot({
+				plan: {
+					title: 'Sunday',
+					items,
+					activeItemIndex: 1,
+					isAtEndOfPlan: true,
+					canLoadNextService: false,
+					pcoServiceTypeId: null,
+					pcoPlanId: null,
+				},
+			}),
+		)
 		assert.equal(state.nextPlanItem(), undefined)
 	})
 
 	test('applyMessage records the latest message independently of state snapshots', () => {
 		const state = new ModuleState()
-		const message = { id: 'm1', sender: 'Producer', targetRoleId: null, senderRoleId: null, text: '30 seconds', timestamp: '2024-01-15T10:30:45Z', isHighPriority: true }
+		const message = {
+			id: 'm1',
+			sender: 'Producer',
+			targetRoleId: null,
+			senderRoleId: null,
+			text: '30 seconds',
+			timestamp: '2024-01-15T10:30:45Z',
+			isHighPriority: true,
+		}
 		state.applyMessage(message)
 		assert.equal(state.lastMessage.text, '30 seconds')
 	})

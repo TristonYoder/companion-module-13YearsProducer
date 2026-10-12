@@ -74,6 +74,50 @@ describe('health & state', () => {
 	})
 })
 
+// Newer app versions stamp snapshots with a monotonic rev and serve a slim
+// timer route; an older app has neither, and the module must cope — so each
+// check skips rather than fails when the field is absent.
+describe('revision stamps & slim timer (newer apps only)', () => {
+	test('rev, when present, never goes backwards between reads', async () => {
+		const first = await api.getState()
+		if (typeof first.rev !== 'number') return
+		const second = await api.getState()
+		assert.ok(second.rev >= first.rev)
+		assert.equal(typeof first.serverNowMs, 'number')
+	})
+
+	test('GET /v1/timer has the slim shape, when the route exists', async () => {
+		const reply = await api.getTimer().catch((err) => {
+			if (err instanceof ApiError && err.status === 404) return null
+			throw err
+		})
+		if (!reply) return
+		assert.ok('timer' in reply)
+		assert.equal(typeof reply.rev, 'number')
+	})
+
+	test('a command reply is a full snapshot carrying a rev, when the app stamps one', async () => {
+		const reply = await api.timerAdjust(0).catch((err) => {
+			if (err instanceof ApiError && err.status === 409) return null
+			throw err
+		})
+		if (!reply || typeof reply.rev !== 'number') return
+		assert.ok(Array.isArray(reply.roles))
+	})
+})
+
+describe('request timeout', () => {
+	test('an unreachable host fails fast with a status-0 ApiError', async () => {
+		const dead = new ControlApi(() => ({ host: '127.0.0.1', port: 1 }))
+		const started = Date.now()
+		await assert.rejects(
+			() => dead.getHealth(),
+			(err) => err instanceof ApiError && err.status === 0,
+		)
+		assert.ok(Date.now() - started < 4000)
+	})
+})
+
 describe('roles & cues (reversible)', () => {
 	test('firing a role cue GO then OFF round-trips through the real engine', async () => {
 		const roles = await api.listRoles()
@@ -175,12 +219,12 @@ describe('timer (reversible)', () => {
 			const afterUp = await api.getState()
 			assert.equal(afterUp.timer.remainingSeconds, before + action.bySeconds)
 
-			// The app itself keeps counting into overtime (remainingSeconds goes
-			// negative); the keypad's preview clamps at 0 exactly as the app's own
-			// popover does, so the two only line up above zero.
-			if (before + action.bySeconds < 0) {
-				assert.equal(resolvedSeconds(action, before), 0)
-			}
+			// A relative entry may push remaining negative (overtime); it floors at
+			// minus the item's elapsed time, where the item's length would hit 0.
+			assert.equal(
+				resolvedSeconds(action, before, state.timer.item.elapsedSeconds),
+				Math.max(-state.timer.item.elapsedSeconds, before + action.bySeconds),
+			)
 			// Whatever the number is, the app formats it exactly the way the preview
 			// line does — both taken from the same snapshot.
 			assert.equal(

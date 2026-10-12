@@ -10,7 +10,7 @@
 // never send a wrong command. Keep it faithful anyway: unit/timerEntry.test.mjs
 // runs the same cases as Tests/CueEngineTests.swift's TimerInputParserTests.
 
-import type { HourFormatThreshold } from './types'
+import type { HourFormatThreshold } from './types.js'
 
 /** `TimerInputParser.Action`, as a discriminated union rather than a Swift enum. */
 export type TimerInputAction = { kind: 'setAbsolute'; seconds: number } | { kind: 'adjustRelative'; bySeconds: number }
@@ -165,21 +165,37 @@ function pad2(value: number): string {
 	return String(value).padStart(2, '0')
 }
 
-/** What the timer would read if this action were committed against `baseSeconds`, clamped at 0 — `TimeEntryPopoverModifier.resolvedSeconds(for:)`. */
-export function resolvedSeconds(action: TimerInputAction, baseSeconds: number): number {
-	return action.kind === 'setAbsolute' ? Math.max(0, action.seconds) : Math.max(0, baseSeconds + action.bySeconds)
+/**
+ * What the timer's remaining time would read if this action were committed.
+ * An absolute entry sets it (clamped at 0). A relative one lands on
+ * `max(-elapsed, remaining + delta)`: the app clamps the item's *length* at 0,
+ * not the remaining time, so a timer in overtime can still be nudged further
+ * negative until the length would go below zero.
+ */
+export function resolvedSeconds(action: TimerInputAction, baseSeconds: number, elapsedSeconds = 0): number {
+	return action.kind === 'setAbsolute'
+		? Math.max(0, action.seconds)
+		: Math.max(0 - elapsedSeconds, baseSeconds + action.bySeconds)
 }
 
 /**
  * The popover's "screen" preview line: the formatted result of applying
  * `buffer` to `baseSeconds`, or an empty string whenever what's typed doesn't
- * parse to a time yet — blank, deliberately, rather than an error string.
+ * parse to a time yet — blank, deliberately, rather than an error string. A
+ * relative entry with no active timer (`baseSeconds` null) has nothing to
+ * adjust, so it is blank too.
  */
-export function previewText(buffer: string, baseSeconds: number, threshold: HourFormatThreshold): string {
+export function previewText(
+	buffer: string,
+	baseSeconds: number | null,
+	threshold: HourFormatThreshold,
+	elapsedSeconds = 0,
+): string {
 	const action = parseTimerInput(buffer)
 	if (!action) return ''
+	if (action.kind === 'adjustRelative' && baseSeconds === null) return ''
 
-	const result = formatDuration(resolvedSeconds(action, baseSeconds), threshold)
+	const result = formatDuration(resolvedSeconds(action, baseSeconds ?? 0, elapsedSeconds), threshold)
 	if (action.kind === 'setAbsolute') return result
 
 	// A relative entry leads with the amount it's about to add or take off,
