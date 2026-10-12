@@ -67,6 +67,7 @@ export function canonicalMessages(state: Pick<ControlAPIState, 'messages'>): str
 			if (byTime !== 0 && !Number.isNaN(byTime)) return byTime
 			return compareBytes(a.id, b.id)
 		})
+		.slice(0, 16)
 		.map((m) => m.id)
 		.join(RS)
 }
