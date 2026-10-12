@@ -1,8 +1,3 @@
-// Unit tests for the sync protocol v2.1 amendments: producer epoch, monotonic
-// clock-sample aging and bounds, strict rev gating, anchor bounds, and the
-// session's reaction to a restart or a wake. No app required.
-//
-//   npm run test:unit
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 
@@ -70,7 +65,7 @@ describe('clock sample aging and bounds', () => {
 	test('a sample older than 90 s is ignored', () => {
 		let now = 0
 		const sync = new ClockSync(() => now)
-		sync.addSample(0, 100, 100, 0) // offset 100, rtt 0, received at 0
+		sync.addSample(0, 100, 100, 0)
 		assert.equal(sync.rttMs, 0)
 		now = SYNC_MAX_AGE_MS
 		assert.equal(sync.rttMs, 0)
@@ -81,18 +76,17 @@ describe('clock sample aging and bounds', () => {
 	test('an aged-out best no longer wins over a fresh, slower sample', () => {
 		let now = 0
 		const sync = new ClockSync(() => now)
-		sync.addSample(0, 1000, 1000, 0) // rtt 0, offset 1000
+		sync.addSample(0, 1000, 1000, 0)
 		now = 100_000
-		sync.addSample(now, now + 1030, now + 1030, now + 60) // rtt 60, offset 1000
+		sync.addSample(now, now + 1030, now + 1030, now + 60)
 		assert.equal(sync.rttMs, 60)
 	})
 
 	test('a fresh offset far from the held best discards the older samples', () => {
 		const sync = new ClockSync(() => 1000)
-		sync.addSample(0, 100, 100, 0) // offset 100, rtt 0: the best
 		sync.addSample(0, 100, 100, 0)
-		// Off by 400 ms with rtt 20: more than max(50, 40), so history goes.
-		sync.addSample(0, 500, 500, 40) // offset 480, rtt 40
+		sync.addSample(0, 100, 100, 0)
+		sync.addSample(0, 500, 500, 40)
 		assert.equal(sync.rttMs, 40)
 		assert.equal(sync.offsetMs, 480)
 	})
@@ -100,15 +94,15 @@ describe('clock sample aging and bounds', () => {
 	test('a small change (within max(50 ms, 2 * rtt)) keeps the history', () => {
 		const sync = new ClockSync(() => 1000)
 		sync.addSample(0, 100, 100, 0)
-		sync.addSample(0, 130, 130, 0) // 30 ms off, within 50
+		sync.addSample(0, 130, 130, 0)
 		assert.equal(sync.rttMs, 0)
-		sync.addSample(0, 180, 180, 200) // offset 80 rtt 200: 20 ms off... within 2*rtt
+		sync.addSample(0, 180, 180, 200)
 		assert.equal(sync.rttMs, 0)
 	})
 
 	test('a negative rtt (millisecond rounding) is treated as 0', () => {
 		const sync = new ClockSync(() => 1000)
-		const sample = sync.addSample(0, 10, 15, 3) // (3-0)-(15-10) = -2
+		const sample = sync.addSample(0, 10, 15, 3)
 		assert.equal(sample.rtt, 0)
 		assert.equal(sync.rttMs, 0)
 	})
@@ -247,8 +241,6 @@ describe('anchor bounds', () => {
 	})
 })
 
-// MARK: - Session
-
 const flush = async () => {
 	for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve))
 }
@@ -331,10 +323,10 @@ describe('session: restart, wake, epoch', () => {
 		const h = await ready()
 		h.session.checkWake(5_000_000)
 		await h.clock.advance(1000)
-		h.session.checkWake(5_001_000) // in step: nothing
+		h.session.checkWake(5_001_000)
 		assert.equal(syncs(h), SYNC_BURST_COUNT)
 		await h.clock.advance(1000)
-		h.session.checkWake(5_001_000 + 1000 + 3000) // wall moved 3 s more than the monotonic clock
+		h.session.checkWake(5_001_000 + 1000 + 3000)
 		await h.clock.advance(SYNC_BURST_GAP_MS * SYNC_BURST_COUNT)
 		assert.equal(syncs(h), SYNC_BURST_COUNT * 2)
 		h.session.stop()

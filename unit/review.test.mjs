@@ -1,7 +1,3 @@
-// Pure unit tests for the revision guard, definition signature, service timing,
-// rundown paging, progress bar and preset gating. No running app required.
-//
-//   npm run test:unit
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 import { inflateSync } from 'node:zlib'
@@ -151,7 +147,6 @@ describe('service timing', () => {
 
 	test('over/under is blank without a schedule, signed against startsAt + planned total with one', () => {
 		assert.equal(loaded().serviceOverUnderText, '')
-		// planned total 900s; start 11:55 -> planned end 12:10; projected 12:10 -> on time (+00:00)
 		const start = new Date(NOW - 5 * 60_000).toISOString()
 		const on = loaded({ entries: [{ id: 's', title: 'S', startsAt: start }], nextId: 's' })
 		assert.equal(on.serviceOverUnderText, '+00:00')

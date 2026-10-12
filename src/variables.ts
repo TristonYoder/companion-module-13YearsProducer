@@ -2,15 +2,8 @@ import type { CompanionVariableDefinition, CompanionVariableValues } from '@comp
 import { MAX_INDEXED_ROLES, RUNDOWN_ROWS, type ModuleState } from './state.js'
 import { CUE_STATE_LABELS } from './types.js'
 
-/**
- * Definitions are rebuilt on every snapshot, not just at init: roles, waypoints
- * and schedules are all producer-defined and change mid-service, and each one
- * gets its own variables so a button can be authored against a name instead of
- * an index.
- */
 export function getVariableDefinitions(state: ModuleState): CompanionVariableDefinition[] {
 	const definitions: CompanionVariableDefinition[] = [
-		// Connection
 		{ variableId: 'connection_status', name: 'Connection Status' },
 		{ variableId: 'connection_stale', name: 'Connection Is Stale (connected, but no data lately)' },
 		{ variableId: 'sync_offset_ms', name: 'Clock Offset To Producer (ms, producer minus this machine)' },
@@ -25,18 +18,15 @@ export function getVariableDefinitions(state: ModuleState): CompanionVariableDef
 		{ variableId: 'relay_enabled', name: 'Cloud Relay Enabled' },
 		{ variableId: 'relay_host', name: 'Cloud Relay Host' },
 
-		// App
 		{ variableId: 'app_mode', name: 'App Mode' },
 		{ variableId: 'settings_hour_format_threshold', name: 'HH:MM:SS Formatting Threshold' },
 
-		// Plan
 		{ variableId: 'plan_title', name: 'Plan Title' },
 		{ variableId: 'plan_item_count', name: 'Plan Item Count' },
 		{ variableId: 'plan_item_index', name: 'Plan Item Index (1-based)' },
 		{ variableId: 'plan_is_at_end', name: 'Plan Is At End' },
 		{ variableId: 'plan_can_load_next_service', name: 'Can Load Next Service' },
 
-		// Active item
 		{ variableId: 'active_item_title', name: 'Active Item Title' },
 		{ variableId: 'active_item_type', name: 'Active Item Type' },
 		{ variableId: 'active_item_service_plan_title', name: 'Active Item Service Plan Title' },
@@ -54,43 +44,35 @@ export function getVariableDefinitions(state: ModuleState): CompanionVariableDef
 		{ variableId: 'next_item_length', name: 'Next Item Length' },
 		{ variableId: 'active_item_progress_pct', name: 'Active Item Progress (0-100)' },
 
-		// Service timing
 		{ variableId: 'projected_end_time', name: 'Projected End Time (local HH:MM)' },
 		{ variableId: 'service_remaining_total', name: 'Service Time Remaining (live item + everything after)' },
 		{ variableId: 'service_over_under', name: 'Service Over/Under vs. Next Schedule (+ is over)' },
 
-		// Rundown
 		{ variableId: 'rundown_page', name: 'Rundown Page (1-based)' },
 		{ variableId: 'rundown_page_count', name: 'Rundown Page Count' },
 
-		// Timer entry keypad (this module's own buffer, not the app's)
 		{ variableId: 'timer_entry_buffer', name: 'Timer Entry Buffer (what the keypad has typed)' },
 		{ variableId: 'timer_entry_preview', name: 'Timer Entry Preview (what committing it would read)' },
 
-		// Roles
 		{ variableId: 'selected_role_names', name: 'Selected Role Names' },
 		{ variableId: 'role_count', name: 'Role Count' },
 
-		// Messages
 		{ variableId: 'last_message_text', name: 'Last Message Text' },
 		{ variableId: 'last_message_sender', name: 'Last Message Sender' },
 		{ variableId: 'last_message_is_high_priority', name: 'Last Message Is High Priority' },
 		{ variableId: 'message_count', name: 'Message Count' },
 		{ variableId: 'notification_standing', name: 'Notification Is Standing' },
 
-		// Planning Center
 		{ variableId: 'pco_connected', name: 'Planning Center Connected' },
 		{ variableId: 'pco_user_name', name: 'Planning Center User Name' },
 		{ variableId: 'pco_live_sync_enabled', name: 'Planning Center Live Sync Enabled' },
 		{ variableId: 'pco_plan_filter', name: 'Planning Center Plan Filter' },
 		{ variableId: 'pco_last_error', name: 'Planning Center Last Error' },
 
-		// Plotiphar
 		{ variableId: 'plotiphar_pairing_state', name: 'Plotiphar Pairing State' },
 		{ variableId: 'plotiphar_pairing_code', name: 'Plotiphar Pairing Code' },
 		{ variableId: 'plotiphar_assignment_sync_status', name: 'Plotiphar Assignment Sync Status' },
 
-		// Waypoints & schedules
 		{ variableId: 'waypoint_count', name: 'Waypoint Count' },
 		{ variableId: 'waypoints_assigned_count', name: 'Waypoints Assigned In This Plan' },
 		{ variableId: 'schedule_count', name: 'Schedule Count' },
@@ -119,7 +101,6 @@ export function getVariableDefinitions(state: ModuleState): CompanionVariableDef
 		)
 	}
 
-	// The same roles by position, for buttons authored against "role 3" rather than a name.
 	for (let index = 0; index < Math.min(state.roles.length, MAX_INDEXED_ROLES); index++) {
 		const n = index + 1
 		definitions.push(
@@ -130,9 +111,6 @@ export function getVariableDefinitions(state: ModuleState): CompanionVariableDef
 		)
 	}
 
-	// Keyed by the waypoint's own slug — the same token the API resolves and a
-	// preset button is authored against, so `$(13years:waypoint_sermon_item)`
-	// reads as the waypoint you pressed.
 	for (const waypoint of state.waypoints) {
 		definitions.push(
 			{ variableId: `waypoint_${waypoint.slug}_item`, name: `Waypoint: ${waypoint.name} — assigned item` },
@@ -197,9 +175,6 @@ export function getVariableValues(state: ModuleState): CompanionVariableValues {
 		rundown_page: state.rundownPageIndex + 1,
 		rundown_page_count: state.rundownPageCount,
 
-		// Both blank when nothing is typed, deliberately — the app's own popover
-		// leaves its preview line blank rather than showing an error for
-		// half-typed input, and a blank readout button reads the same way.
 		timer_entry_buffer: state.timerEntryBuffer,
 		timer_entry_preview: state.timerEntryPreview,
 

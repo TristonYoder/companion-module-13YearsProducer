@@ -1,13 +1,3 @@
-// Pure unit tests for the Timer Entry keypad: the TypeScript port of the app's
-// own input grammar and duration formatting, plus the buffer editing the
-// keypad's keys do.
-//
-// The parse cases below are the same ones the app asserts in
-// /Users/tyoder/Projects/13years/Tests/CueEngineTests.swift
-// (TimerInputParserTests / TimeFormattingTests) — if the Swift parser's rules
-// change, these are what should catch the drift.
-//
-//   npm run test:unit
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 
@@ -67,11 +57,7 @@ describe('parseTimerInput', () => {
 		assert.equal(parseTimerInput('abc'), null)
 		assert.equal(parseTimerInput('+'), null)
 		assert.equal(parseTimerInput(':'), null)
-		// Trailing digits with no unit after them isn't valid combined-unit
-		// input — that's bare-digit/separator territory, and "2m3" has neither
-		// a separator nor a trailing unit to fall back to.
 		assert.equal(parseTimerInput('2m3'), null)
-		// A repeated unit is ambiguous, not just "sum it again".
 		assert.equal(parseTimerInput('1m2m'), null)
 	})
 })
@@ -128,9 +114,6 @@ describe('previewText', () => {
 	})
 
 	test("a relative entry's sign is the one typed, not the one overtime would print", () => {
-		// `formatDuration` prefixes "+" for a negative duration, which means
-		// overtime — nothing to do with subtracting. The magnitude is what gets
-		// formatted here, so "-5m" must not come out as "+05:00".
 		assert.equal(previewText('-5m', 600, 'over90Minutes'), '-05:00\n= 05:00')
 	})
 

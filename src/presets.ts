@@ -7,8 +7,6 @@ import { ModuleState, RUNDOWN_ROWS } from './state.js'
 import { TIMER_ENTRY_GLYPHS, TIMER_ENTRY_GLYPHS_DARK } from './glyphs.js'
 import { ICON_PLATES, ICONS } from './icons.js'
 
-// Shared palette — the cue colours come from CueState.swift so a Companion
-// button matches the app's own screen; the rest are this module's.
 const GREEN = combineRgb(38, 199, 89)
 const RED = combineRgb(204, 0, 0)
 const BLUE = combineRgb(74, 144, 226)
@@ -19,27 +17,8 @@ const AMBER = combineRgb(245, 184, 38)
 const PURPLE = combineRgb(126, 87, 194)
 const INK_DARK = combineRgb(26, 26, 26)
 
-/** `false` falls back to plain Companion text on every Timer Entry key. */
 const USE_GLYPH_KEY_FACES = true
 
-/**
- * A button's face.
- *
- * Companion's *module* preset API gives one image slot (`png64`) plus text on
- * top of it — the layered element stack Companion 5.0 draws with is composed in
- * its UI, and a module can only declare element stacks through
- * `@companion-module/base` 2.x, which Companion 5.0.4 refuses to load
- * ("Incompatible module version"). So the icon and the grey plate arrive
- * pre-flattened into a single image (`ICON_PLATES`, see
- * scripts/render-icons.swift), drawn over the button's own `bgcolor`.
- *
- * Tracked for when the runtime catches up: https://github.com/TristonYoder/companion-module-13YearsProducer/issues/1
- *
- * The plate is rendered at partial alpha, so `bgcolor` still reads through it
- * and a feedback's recolour stays visible. Cue buttons pass `plate: false` and
- * get the bare glyph instead: a cue's colour *is* the information, and washing
- * it grey is the one place that hurts.
- */
 function face(spec: {
 	icon?: string
 	glyph?: string
@@ -63,27 +42,22 @@ function face(spec: {
 		color: spec.textColor ?? WHITE,
 		bgcolor: spec.color ?? DARK,
 		...(artwork ? { png64: artwork, pngalignment: 'center:center' as const } : {}),
-		// The plated artwork leaves its lower third clear for exactly this.
 		alignment: 'center:bottom' as const,
 	}
 }
 
-/** The style a boolean feedback paints over a button while it's true. */
 function bg(color: number) {
 	return { bgcolor: color }
 }
 
-/** Per-instance config that shapes the presets. */
 export interface PresetOptions {
 	overtimeRed: boolean
 }
 
-/** A lit key keeps its glyph, but in dark ink — a white face on a light recolour would vanish. */
 function lit(color: number, glyph: string) {
 	return { bgcolor: color, color: INK_DARK, png64: TIMER_ENTRY_GLYPHS_DARK[glyph] }
 }
 
-/** A role id as a preset-id segment: ids are UUID-like already, this only guards anything stranger. */
 function presetKey(id: string): string {
 	return id.replace(/[^A-Za-z0-9_-]/g, '_')
 }
@@ -94,11 +68,6 @@ export function getPresetDefinitions(
 ): CompanionPresetDefinitions {
 	const presets: CompanionPresetDefinitions = {}
 	const overtimeFeedbacks = options.overtimeRed ? [{ feedbackId: 'timerOvertime', options: {}, style: bg(RED) }] : []
-
-	// MARK: - Cues
-	//
-	// The only buttons with no gradient plate: a cue button's colour is the
-	// information, and washing it grey would be the one place that hurts.
 
 	for (const cueState of FIRABLE_CUE_STATES) {
 		presets[`cue_${cueState.toLowerCase()}`] = {
@@ -125,13 +94,6 @@ export function getPresetDefinitions(
 		feedbacks: [],
 		steps: [{ down: [{ actionId: 'clearAllCues', options: {} }], up: [] }],
 	}
-
-	// MARK: - Per-role cues
-	//
-	// One set per role on the show, keyed by the role's (stable) id so a rename
-	// keeps the button a producer already dragged onto a page. They regenerate
-	// as roles come and go, because the definitions are rebuilt when the role
-	// list's signature changes.
 
 	for (const role of state.roles) {
 		const key = presetKey(role.id)
@@ -174,8 +136,6 @@ export function getPresetDefinitions(
 			}
 		}
 	}
-
-	// MARK: - Timer transport
 
 	const transport: { id: string; name: string; icon: string; label: string; actionId: string; color: number }[] = [
 		{
@@ -240,8 +200,6 @@ export function getPresetDefinitions(
 			steps: [{ down: [{ actionId: 'timerAdjust', options: { seconds: -seconds } }], up: [] }],
 		}
 	}
-
-	// MARK: - Service navigation
 
 	presets['plan_previous'] = {
 		type: 'button',
@@ -322,8 +280,6 @@ export function getPresetDefinitions(
 		steps: [{ down: [], up: [] }],
 	}
 
-	// MARK: - Service timing
-
 	const timingStatus: { id: string; name: string; label: string; icon: string }[] = [
 		{
 			id: 'projected_end',
@@ -371,12 +327,6 @@ export function getPresetDefinitions(
 		steps: [{ down: [], up: [] }],
 	}
 
-	// MARK: - Rundown
-	//
-	// Eight rows over the current page of the plan. A row's item is whatever the
-	// module-held page puts there, so the press resolves it at the moment it
-	// lands (`planJumpToRow`) rather than baking an item id into the button.
-
 	for (let row = 1; row <= RUNDOWN_ROWS; row++) {
 		presets[`rundown_row_${row}`] = {
 			type: 'button',
@@ -417,11 +367,6 @@ export function getPresetDefinitions(
 		feedbacks: [],
 		steps: [{ down: [{ actionId: 'rundownPageDown', options: {} }], up: [] }],
 	}
-
-	// MARK: - Timer entry keypad
-	//
-	// The app's calculator grid, one button per key; names carry row and column
-	// so the pad can be dropped onto a page in order.
 
 	const entryAppend = (key: string) => [{ actionId: 'timerEntryAppend', options: { key } }]
 	const entryKey = (
@@ -519,12 +464,6 @@ export function getPresetDefinitions(
 		[{ feedbackId: 'timerEntryInProgress', options: {}, style: lit(AMBER, 'backspace') }],
 	)
 
-	// MARK: - Waypoints
-	//
-	// The `waypointAssigned` feedback is the point of these: firing a waypoint
-	// nothing carries answers 409 and does nothing, so the button greys itself
-	// out *before* it's pressed rather than failing under the operator's finger.
-
 	const firstWaypoint = state.waypointChoices()[0]?.id ?? ''
 
 	presets['waypoint_go'] = {
@@ -595,8 +534,6 @@ export function getPresetDefinitions(
 		steps: [{ down: [], up: [] }],
 	}
 
-	// MARK: - Service schedules
-
 	const firstSchedule = state.scheduleChoices()[0]?.id ?? ''
 
 	presets['schedule_go_live_next'] = {
@@ -640,8 +577,6 @@ export function getPresetDefinitions(
 		steps: [{ down: [], up: [] }],
 	}
 
-	// MARK: - Projected / Actual
-
 	presets['duration_toggle_live'] = {
 		type: 'button',
 		category: 'Projected / Actual',
@@ -668,8 +603,6 @@ export function getPresetDefinitions(
 		feedbacks: [{ feedbackId: 'timerIsActual', options: {}, style: bg(PURPLE) }],
 		steps: [{ down: [], up: [] }],
 	}
-
-	// MARK: - Messages
 
 	presets['message_send'] = {
 		type: 'button',
@@ -713,8 +646,6 @@ export function getPresetDefinitions(
 		steps: [{ down: [], up: [] }],
 	}
 
-	// MARK: - Planning Center
-
 	presets['pco_refresh_plans'] = {
 		type: 'button',
 		category: 'Planning Center',
@@ -750,8 +681,6 @@ export function getPresetDefinitions(
 		feedbacks: [{ feedbackId: 'pcoConnected', options: {}, style: bg(GREEN) }],
 		steps: [{ down: [], up: [] }],
 	}
-
-	// MARK: - Status displays
 
 	presets['status_connection'] = {
 		type: 'button',

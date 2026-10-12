@@ -1,8 +1,3 @@
-// Unit tests for action feedback, startTimer defaults, repeat guard, per-role
-// presets, new variables and feedbacks, dropdown staleness, and the small
-// API-capability actions. No running app required.
-//
-//   npm run test:unit
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 
@@ -322,7 +317,7 @@ describe('variables', () => {
 		const local = { value: 1_000_000 }
 		const state = new ModuleState(() => local.value)
 		state.setProtoVersion(2)
-		state.sync.addSample(local.value, local.value + 5000, local.value + 5000, local.value) // producer 5 s ahead
+		state.sync.addSample(local.value, local.value + 5000, local.value + 5000, local.value)
 		const producerNow = local.value + 5000
 		state.applyState(
 			snap({
@@ -370,7 +365,7 @@ describe('variables', () => {
 		assert.equal(getVariableValues(state).sync_quality, 'legacy')
 		state.setProtoVersion(2)
 		assert.equal(getVariableValues(state).sync_quality, 'v2')
-		state.sync.addSample(0, 40, 40, 30) // rtt 30
+		state.sync.addSample(0, 40, 40, 30)
 		assert.equal(getVariableValues(state).sync_quality, 'v2 ±15 ms')
 		state.setProtoVersion(1)
 		assert.equal(getVariableValues(state).sync_quality, 'legacy')

@@ -1,17 +1,10 @@
 import { isIPv6 } from 'node:net'
 import { DEFAULT_PORT } from './config.js'
 
-/** Where the module should dial, or why it can't. */
 export type ResolvedConnection = { ok: true; host: string; port: number } | { ok: false; reason: string }
 
 const EMPTY_HOST = 'Set the Producer host/IP in the connection settings'
 
-/**
- * Trims the configured host and makes it safe to put in a URL: an IPv6
- * literal gets its brackets (and a zone id its `%25`), anything that looks
- * like a URL, a path or `host:port` is rejected with a reason the operator
- * can act on rather than dialled and failed.
- */
 export function normalizeHost(raw: unknown): { ok: true; host: string } | { ok: false; reason: string } {
 	const text = typeof raw === 'string' ? raw.trim() : ''
 	if (!text) return { ok: false, reason: EMPTY_HOST }
@@ -35,7 +28,6 @@ export function normalizeHost(raw: unknown): { ok: true; host: string } | { ok: 
 	return { ok: true, host: text }
 }
 
-/** A saved config's host and port, validated. A config saved before the port field existed dials the default. */
 export function resolveConnection(config: { host?: unknown; port?: unknown } | undefined): ResolvedConnection {
 	const host = normalizeHost(config?.host)
 	if (!host.ok) return host
@@ -47,7 +39,6 @@ export function resolveConnection(config: { host?: unknown; port?: unknown } | u
 	return { ok: true, host: host.host, port }
 }
 
-/** Whether the part of two configs that decides where we dial differs. Everything else (overtimeRed ...) applies without reconnecting. */
 export function connectionChanged(
 	previous: { host?: unknown; port?: unknown } | undefined,
 	next: { host?: unknown; port?: unknown } | undefined,
@@ -84,12 +75,6 @@ function codeOf(err: unknown): string | undefined {
 	return undefined
 }
 
-/**
- * What a failed connection attempt means in the operator's terms, or `null`
- * when it's none of the failures worth naming (the caller then keeps the raw
- * message). Understands both Node's socket errors (`fetch`, `ws`) and the
- * messages `ws` raises for a failed upgrade or handshake.
- */
 export function describeConnectionError(err: unknown): string | null {
 	const code = codeOf(err)
 	const message =

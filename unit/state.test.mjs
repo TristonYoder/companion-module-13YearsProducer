@@ -1,6 +1,3 @@
-// Pure unit tests — no running Producer app required, unlike contract/.
-//
-//   npm run test:unit
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 

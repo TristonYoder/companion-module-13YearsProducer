@@ -1,7 +1,3 @@
-// Unit tests for the sync protocol v2 session (negotiation, clock sync,
-// local tick, digest) against a fake clock and fake socket. No app required.
-//
-//   npm run test:unit
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 
@@ -14,7 +10,6 @@ const flush = async () => {
 	for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve))
 }
 
-/** Virtual time with timers; `advance` fires everything due, in order, flushing promises between. */
 class FakeClock {
 	now = 1_000_000
 	timers = []
@@ -82,10 +77,6 @@ function snap(extra = {}) {
 	}
 }
 
-/**
- * `producerOffset`: producer clock minus the fake local clock. `oneWay`: network delay each way.
- * `proto`: the status the app answers `proto` with (a 404 is an old app).
- */
 function harness({ producerOffset = 0, oneWay = 0, proto = 200, snapshot = snap() } = {}) {
 	const clock = new FakeClock()
 	const state = new ModuleState(() => clock.now)
@@ -100,7 +91,6 @@ function harness({ producerOffset = 0, oneWay = 0, proto = 200, snapshot = snap(
 			if (op === 'proto') return proto === 'hang' ? new Promise(() => {}) : { status: proto, data: { version: 2 } }
 			if (op === 'sync') {
 				const t1 = body.t0 + oneWay + producerOffset
-				// Replies are delivered by the test's clock: model the round trip by advancing it.
 				clock.now += oneWay * 2
 				return { status: 200, data: { t0: body.t0, t1, t2: t1 } }
 			}
@@ -203,7 +193,6 @@ describe('clock sync scheduling', () => {
 describe('local timer tick', () => {
 	test('fires on anchorMs + k*1000 of the producer clock, whatever the offset', async () => {
 		const offset = 333
-		// Anchor in producer time; first boundary 400 ms after "now" on the producer clock.
 		const h = harness({ producerOffset: offset })
 		const producerNow = h.clock.now + offset
 		const a = anchor({ anchorMs: producerNow - 600, lengthInSeconds: 10 })
@@ -216,7 +205,6 @@ describe('local timer tick', () => {
 		const samples = []
 		for (let i = 0; i < 4; i++) {
 			const before = h.log.changes
-			// Advance in 1 ms steps to the next change and record the producer time it landed on.
 			let guard = 0
 			while (h.log.changes === before && guard++ < 1500) await h.clock.advance(1)
 			samples.push({ producer: h.clock.now + offset, remaining: h.state.timerRemainingSeconds })

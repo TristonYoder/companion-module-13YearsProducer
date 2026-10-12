@@ -1,12 +1,10 @@
 import type { SomeCompanionConfigField } from '@companion-module/base'
 
-/** Sits beside the app's LAN cue port (13380) and producer-assign port (13381) — see ControlAPIServer.swift. */
 export const DEFAULT_PORT = 13390
 
 export interface ModuleConfig {
 	host: string
 	port: number
-	/** Absent in configs saved before this option existed — treated as on. */
 	overtimeRed?: boolean
 }
 

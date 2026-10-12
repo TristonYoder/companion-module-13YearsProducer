@@ -1,7 +1,3 @@
-// Pure unit tests for sync protocol v2's building blocks: the hash and its
-// canonical strings, the clock-offset estimator, and anchor arithmetic.
-//
-//   npm run test:unit
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 
@@ -97,7 +93,6 @@ describe('FNV-1a 64 (spec test vectors)', () => {
 			),
 			'dddb4a3dc4d94432',
 		)
-		// Equal timestamps: id ascending, whichever order they were held in.
 		for (const ids of [
 			['a', 'b'],
 			['b', 'a'],
@@ -136,7 +131,6 @@ describe('FNV-1a 64 (spec test vectors)', () => {
 describe('clock offset estimation', () => {
 	test('offset and rtt follow the NTP formulas', () => {
 		const sync = new ClockSync(() => 0)
-		// Producer is 500 ms ahead; 20 ms each way, 2 ms producer processing.
 		const sample = sync.addSample(1000, 1520, 1522, 1042)
 		assert.equal(sample.rtt, 40)
 		assert.equal(sample.offset, 500)
@@ -146,8 +140,7 @@ describe('clock offset estimation', () => {
 
 	test('the lowest-RTT sample wins, even against an asymmetric slow one', () => {
 		const sync = new ClockSync(() => 0)
-		sync.addSample(0, 500, 500, 10) // rtt 10, offset 495
-		// All the delay on the way back: rtt 210, offset looks like 400.
+		sync.addSample(0, 500, 500, 10)
 		sync.addSample(1000, 1500, 1500, 1210)
 		assert.equal(sync.rttMs, 10)
 		assert.equal(sync.offsetMs, 495)
@@ -155,8 +148,7 @@ describe('clock offset estimation', () => {
 
 	test('a change under 20 ms moves 25% of the way; 20 ms or more jumps', () => {
 		const sync = new ClockSync(() => 0)
-		sync.addSample(0, 100, 100, 0) // offset 100, rtt 0
-		// Better (lower-rtt is impossible below 0), so use equal rtt: the newest of equals wins.
+		sync.addSample(0, 100, 100, 0)
 		sync.addSample(0, 110, 110, 0)
 		assert.equal(sync.offsetMs, 102.5)
 		sync.addSample(0, 110, 110, 0)
@@ -167,8 +159,8 @@ describe('clock offset estimation', () => {
 
 	test('keeps only the last 8 samples', () => {
 		const sync = new ClockSync(() => 0)
-		sync.addSample(0, 50, 50, 1) // rtt 1, offset 49.5 — the best, until it ages out
-		for (let i = 0; i < SYNC_SAMPLE_COUNT - 1; i++) sync.addSample(0, 50, 50, 100) // rtt 100, offset 0
+		sync.addSample(0, 50, 50, 1)
+		for (let i = 0; i < SYNC_SAMPLE_COUNT - 1; i++) sync.addSample(0, 50, 50, 100)
 		assert.equal(sync.rttMs, 1)
 		sync.addSample(0, 50, 50, 100)
 		assert.equal(sync.rttMs, 100)
@@ -248,7 +240,7 @@ describe('anchor arithmetic', () => {
 		let now = 5000
 		const state = new ModuleState(() => now)
 		state.setProtoVersion(2)
-		state.sync.addSample(0, 2000, 2000, 0) // producer 2000 ms ahead
+		state.sync.addSample(0, 2000, 2000, 0)
 		state.applyState(snap({ timer: activeTimer(anchor({ anchorMs: 7000, elapsedMs: 0, lengthInSeconds: 60 })) }))
 		assert.equal(state.nowMs, 7000)
 		assert.equal(state.timerRemainingSeconds, 60)
@@ -285,7 +277,7 @@ describe('v2 vs legacy accessors', () => {
 		let now = 1000
 		const state = new ModuleState(() => now)
 		state.setProtoVersion(2)
-		state.sync.addSample(0, 40, 40, 0) // offset 40
+		state.sync.addSample(0, 40, 40, 0)
 		state.applyState(
 			snap({
 				timer: activeTimer(anchor({ anchorMs: 1040, elapsedMs: 0, lengthInSeconds: 60 })),

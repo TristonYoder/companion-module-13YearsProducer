@@ -223,12 +223,6 @@ export function getFeedbackDefinitions(state: ModuleState): CompanionFeedbackDef
 			},
 		},
 
-		// MARK: - Timer entry keypad
-
-		// Enter: lit once what's typed actually parses to something the app can
-		// act on, dim (the preset's own base style) while the buffer is empty or
-		// still half-typed — the Companion equivalent of the popover's preview
-		// line filling in.
 		timerEntryCommittable: {
 			type: 'boolean',
 			name: 'Timer Entry Is Committable',
@@ -242,8 +236,6 @@ export function getFeedbackDefinitions(state: ModuleState): CompanionFeedbackDef
 			},
 		},
 
-		// The active sign key, so a relative entry is visible at a glance on the
-		// pad the way a leading "+"/"−" is on the popover's screen.
 		timerEntrySignIs: {
 			type: 'boolean',
 			name: 'Timer Entry Sign Is',
@@ -268,8 +260,6 @@ export function getFeedbackDefinitions(state: ModuleState): CompanionFeedbackDef
 			},
 		},
 
-		// "There's something typed" — for C and Backspace, which are otherwise
-		// indistinguishable from dead keys until you notice the screen.
 		timerEntryInProgress: {
 			type: 'boolean',
 			name: 'Timer Entry In Progress',
@@ -295,8 +285,6 @@ export function getFeedbackDefinitions(state: ModuleState): CompanionFeedbackDef
 				return state.pco?.isConnected === true
 			},
 		},
-
-		// MARK: - Waypoints
 
 		waypointAssigned: {
 			type: 'boolean',
@@ -348,8 +336,6 @@ export function getFeedbackDefinitions(state: ModuleState): CompanionFeedbackDef
 			},
 		},
 
-		// MARK: - Projected / Actual
-
 		timerIsActual: {
 			type: 'boolean',
 			name: 'Live Item Is Actual (not Projected)',
@@ -391,8 +377,6 @@ export function getFeedbackDefinitions(state: ModuleState): CompanionFeedbackDef
 			},
 		},
 
-		// MARK: - Notifications
-
 		notificationStanding: {
 			type: 'boolean',
 			name: 'Notification Is Standing',
@@ -407,8 +391,6 @@ export function getFeedbackDefinitions(state: ModuleState): CompanionFeedbackDef
 				return state.hasStandingNotification
 			},
 		},
-
-		// MARK: - Service schedules
 
 		scheduleEnabled: {
 			type: 'boolean',
@@ -468,8 +450,6 @@ export function getFeedbackDefinitions(state: ModuleState): CompanionFeedbackDef
 				return state.nextSchedule !== undefined
 			},
 		},
-
-		// MARK: - Cloud
 
 		plotipharPaired: {
 			type: 'boolean',

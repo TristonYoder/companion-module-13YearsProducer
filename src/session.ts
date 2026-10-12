@@ -2,16 +2,11 @@ import { MAX_REV_JUMP, type ModuleState } from './state.js'
 import { computeHashes, mismatchedSections, msToNextBoundary } from './sync.js'
 import type { CommandReply, ControlAPIState, DigestData, SyncReplyData } from './types.js'
 
-/** Samples in the burst right after connecting, spaced `SYNC_BURST_GAP_MS` apart. */
 export const SYNC_BURST_COUNT = 5
 export const SYNC_BURST_GAP_MS = 100
-/** Steady-state sampling period after the burst. */
 export const SYNC_INTERVAL_MS = 30000
-/** How long `proto` / `sync` may go unanswered before the app is treated as not speaking v2. */
 export const COMMAND_TIMEOUT_MS = 5000
-/** The 1 s housekeeping tick finding the wall clock moved by more than this against the monotonic one (sleep, a clock step) restarts clock sync. */
 export const WAKE_DRIFT_MS = 2000
-/** ... and so does a gap this long between ticks, whatever the cause. */
 export const WAKE_GAP_MS = 5000
 
 export interface Scheduler {
@@ -26,33 +21,18 @@ const realScheduler: Scheduler = {
 
 export interface SessionDeps {
 	state: ModuleState
-	/** The socket's command path (`ControlSocket.sendCommand`). */
 	sendCommand: (op: string, body?: unknown) => Promise<CommandReply>
-	/** One `GET /v1/state`. */
 	fetchState: () => Promise<ControlAPIState>
-	/** Hands a fetched catch-up snapshot to the module's rev-guarded snapshot path (which rebases the gate to accept an equal rev). */
 	adopt: (snapshot: ControlAPIState) => void
-	/** Something the variables/feedbacks derive from changed (the local timer ticked, an offset landed, v2 switched on or off). */
 	onChange: () => void
-	/** The negotiated protocol changed; the socket widens or restores its liveness deadline. */
 	onProtocol?: (version: 1 | 2) => void
 	log?: (level: 'debug' | 'info' | 'warn', message: string) => void
 	scheduler?: Scheduler
 }
 
-/**
- * Per-connection driver of sync protocol v2 on the Control API socket:
- * negotiates `proto`, measures the clock offset with the `sync` op, runs the
- * timer locally from its anchor on second boundaries of the app's clock, and
- * answers a digest mismatch with one `GET /v1/state`.
- *
- * Every step degrades to the legacy behaviour: an app that does not answer
- * `proto` with 200 leaves `ModuleState.protoVersion` at 1 and this class idle.
- */
 export class SyncSession {
 	private scheduler: Scheduler
 	private generation = 0
-	/** Bumped whenever the clock-sync run is cancelled or restarted, so a burst or reply from before the restart is dropped. */
 	private syncGeneration = 0
 	private lastTick: { wall: number; mono: number } | null = null
 	private syncTimer: unknown
@@ -68,7 +48,6 @@ export class SyncSession {
 		return this.deps.state.protoVersion === 2
 	}
 
-	/** Call when the socket opens. Resolves once negotiation is settled (not once syncing is done). */
 	async start(): Promise<void> {
 		this.stop()
 		const generation = ++this.generation
@@ -90,7 +69,6 @@ export class SyncSession {
 		void this.runBurst(generation, this.syncGeneration)
 	}
 
-	/** Call when the socket closes or the module is torn down. */
 	stop(): void {
 		this.generation++
 		this.syncGeneration++
@@ -106,13 +84,6 @@ export class SyncSession {
 		}
 	}
 
-	// MARK: - Clock sync
-
-	/**
-	 * Throws away every clock sample and measures again with a fresh burst: the
-	 * answer to a system clock change, a wake from sleep, or the app having
-	 * restarted. In-flight replies from before the restart are dropped.
-	 */
 	restartSync(): void {
 		if (!this.isV2) return
 		if (this.syncTimer !== undefined) this.scheduler.clearTimeout(this.syncTimer)
@@ -123,12 +94,6 @@ export class SyncSession {
 		void this.runBurst(this.generation, syncGeneration)
 	}
 
-	/**
-	 * Call from a ~1 s housekeeping tick with the wall clock. The monotonic clock
-	 * (`state.clock`) does not run during sleep and ignores clock steps, so the
-	 * wall clock pulling away from it, or a long gap between ticks, means the
-	 * offset measured so far may no longer hold.
-	 */
 	checkWake(wallMs: number): void {
 		const mono = this.deps.state.clock()
 		const last = this.lastTick
@@ -139,10 +104,6 @@ export class SyncSession {
 		if (Math.abs(drift) > WAKE_DRIFT_MS || wallDelta > WAKE_GAP_MS || wallDelta < 0) this.restartSync()
 	}
 
-	/**
-	 * The app restarted (a new `epoch`): restart clock sync and, when the packet
-	 * that announced it was not a full snapshot, fetch one.
-	 */
 	handleEpochChange(needsState: boolean): void {
 		if (!this.isV2) return
 		this.restartSync()
@@ -174,7 +135,6 @@ export class SyncSession {
 		}
 	}
 
-	/** One request/response exchange. Failures are dropped: the previous offset stays in force. */
 	async sample(generation = this.generation, syncGeneration = this.syncGeneration): Promise<void> {
 		const { state } = this.deps
 		const t0 = state.clock()
@@ -194,13 +154,6 @@ export class SyncSession {
 		this.deps.onChange()
 	}
 
-	// MARK: - Local timer
-
-	/**
-	 * (Re)arms the tick for the next second boundary of the running timer's
-	 * anchor on the app's clock. Call after anything that can move the anchor
-	 * or the offset; idle when there is nothing counting.
-	 */
 	scheduleTick(): void {
 		if (this.tickTimer !== undefined) this.scheduler.clearTimeout(this.tickTimer)
 		this.tickTimer = undefined
@@ -219,23 +172,13 @@ export class SyncSession {
 		)
 	}
 
-	// MARK: - Digest
-
-	/**
-	 * Compares the app's hashes with ones taken over the held snapshot. Any
-	 * difference (or no snapshot at all) costs exactly one `GET /v1/state`,
-	 * adopted through the usual rev guard; a digest older than what is held, or
-	 * one that arrives while a fetch is in flight, is ignored.
-	 */
 	async handleDigest(digest: DigestData): Promise<void> {
 		const { state } = this.deps
 		if (!this.isV2) return
-		// A new epoch resets the gate and fetches on its own (`handleEpochChange`), whatever the hashes say.
 		if (state.observeEpoch(digest.epoch, true)) return
 		if (this.fetching) return
 		const snapshot = state.snapshot
 		if (snapshot) {
-			// Verification only: a digest repeats the app's current rev, so an equal one is the normal heartbeat; it never advances the gate.
 			if (typeof digest.rev === 'number' && state.rev !== null) {
 				if (digest.rev < state.rev || digest.rev - state.rev > MAX_REV_JUMP) return
 			}
@@ -244,7 +187,6 @@ export class SyncSession {
 		await this.catchUp()
 	}
 
-	/** One `GET /v1/state`, adopted through the rev gate. Concurrent calls collapse into the one in flight. */
 	private async catchUp(): Promise<void> {
 		if (this.fetching) return
 		const generation = this.generation
@@ -258,8 +200,6 @@ export class SyncSession {
 			if (generation === this.generation) this.fetching = false
 		}
 	}
-
-	// MARK: - Plumbing
 
 	private async command(op: string, body: unknown): Promise<CommandReply> {
 		return new Promise<CommandReply>((resolve, reject) => {

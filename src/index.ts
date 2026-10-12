@@ -17,7 +17,6 @@ import { ModuleState } from './state.js'
 import { SyncSession } from './session.js'
 import type { ControlAPIState } from './types.js'
 
-/** Variables the countdown-driven feedbacks (`timerOvertime`, `timerUnderThreshold`, the progress bar) follow. */
 const TIMER_FEEDBACK_VARIABLES = new Set([
 	'active_item_remaining_seconds',
 	'active_item_is_overtime',
@@ -99,7 +98,6 @@ class ThirteenYearsProducerInstance extends InstanceBase<ModuleConfig> {
 		this.socket?.close()
 	}
 
-	/** Only a different host or port is a different connection; other options (overtimeRed ...) just rebuild what they shape. */
 	async configUpdated(config: ModuleConfig): Promise<void> {
 		const reconnect = connectionChanged(this.config, config)
 		this.config = config
@@ -114,7 +112,6 @@ class ThirteenYearsProducerInstance extends InstanceBase<ModuleConfig> {
 		await this.primeAndConnect()
 	}
 
-	/** Tears the link down and forgets everything the old one said, so no variable or feedback keeps describing a connection that is gone. */
 	private disconnect(): void {
 		this.session.stop()
 		this.socket.close()
@@ -131,7 +128,6 @@ class ThirteenYearsProducerInstance extends InstanceBase<ModuleConfig> {
 		return connection.ok ? { host: connection.host, port: connection.port } : { host: '', port: 0 }
 	}
 
-	/** `refresh` is what the Timer Entry keypad actions call: its buffer lives in `ModuleState`, so nothing on the app's side will push the change back for us. */
 	private actionDeps(): ActionDeps {
 		return {
 			api: this.api,
@@ -144,7 +140,6 @@ class ThirteenYearsProducerInstance extends InstanceBase<ModuleConfig> {
 		}
 	}
 
-	/** Once a second: wake/clock-step detection for clock sync, then only transitions (stale/fresh, an action error appearing or expiring) are announced; a quiet link costs nothing per tick. */
 	private checkStale(): void {
 		this.session.checkWake(Date.now())
 		const stale = this.state.isStale
@@ -155,7 +150,6 @@ class ThirteenYearsProducerInstance extends InstanceBase<ModuleConfig> {
 		this.pushDerivedState()
 	}
 
-	/** Sends only the variables whose value moved since the last push. */
 	private pushVariables(): string[] {
 		const values = getVariableValues(this.state)
 		const changed: CompanionVariableValues = {}
@@ -175,7 +169,6 @@ class ThirteenYearsProducerInstance extends InstanceBase<ModuleConfig> {
 		this.checkFeedbacks()
 	}
 
-	/** The local timer ticked, or a clock sample landed: nothing but the countdown-derived values can have moved, so only those feedbacks are re-evaluated, and only if a variable they follow changed. */
 	private pushTimerState(): void {
 		const changed = this.pushVariables()
 		if (changed.some((key) => TIMER_FEEDBACK_VARIABLES.has(key))) {
@@ -183,14 +176,6 @@ class ThirteenYearsProducerInstance extends InstanceBase<ModuleConfig> {
 		}
 	}
 
-	/**
-	 * One REST `GET /v1/state` to prime the instance immediately (so status/
-	 * variables aren't blank while a slower first WebSocket handshake completes),
-	 * then opens the socket, which becomes the sole source of state from that
-	 * point on (its own `hello` event supersedes this priming read). This is the
-	 * only place this module ever polls a GET route on demand rather than
-	 * reacting to a push — everything after this call is push-driven.
-	 */
 	private async primeAndConnect(): Promise<void> {
 		const connection = resolveConnection(this.config)
 		if (!connection.ok) {
@@ -212,7 +197,6 @@ class ThirteenYearsProducerInstance extends InstanceBase<ModuleConfig> {
 		this.socket.connect()
 	}
 
-	/** `authoritative` (hello, or the priming read) drops the revision guard first: a restarted app counts from the start again. */
 	private handleSnapshot(snapshot: ControlAPIState, authoritative = false): void {
 		this.state.setSocketConnected(true)
 		this.state.markFrame()
@@ -223,7 +207,6 @@ class ThirteenYearsProducerInstance extends InstanceBase<ModuleConfig> {
 		this.pushDerivedState()
 	}
 
-	/** A command's own reply is already the new state — apply it now rather than waiting for the socket to echo it, unless the socket got there first with something newer. */
 	private applyReply(snapshot: ControlAPIState, catchUp = false): void {
 		if (!this.state.applyState(snapshot, { catchUp })) return
 		this.refreshDynamicDefinitions()
@@ -231,9 +214,6 @@ class ThirteenYearsProducerInstance extends InstanceBase<ModuleConfig> {
 		this.pushDerivedState()
 	}
 
-	/**
-	 * Roles and plan items are producer-defined and change mid-service (renamed, added, removed) — action/feedback dropdown choices, variable ids, and presets all have to be regenerated when those change. Rebuilding them is expensive and a running timer pushes constantly, so it only happens when the signature of what they're built from differs (or `force`, after a config change).
-	 */
 	private refreshDynamicDefinitions(force = false): void {
 		const overtimeRed = this.config?.overtimeRed !== false
 		const signature = `${this.state.dynamicSignature()}|${overtimeRed}`

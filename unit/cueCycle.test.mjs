@@ -1,7 +1,3 @@
-// Pure unit tests for the Standby → Go! → Clear toggle cycle used by the
-// cycleRoleCue action and the per-role "Cues — Toggle" preset.
-//
-//   npm run test:unit
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 
@@ -15,9 +11,6 @@ describe('nextCueStateInCycle', () => {
 	})
 
 	test('the FLASH_* states the app deleted are gone from the cycle', () => {
-		// CueState.swift dropped FLASH_STANDBY/FLASH_GO outright, so the router
-		// 400s on either. They used to be cycle entries here; this asserts they
-		// stay gone rather than quietly coming back as unpressable buttons.
 		assert.equal(nextCueStateInCycle('FLASH_STANDBY'), undefined)
 		assert.equal(nextCueStateInCycle('FLASH_GO'), undefined)
 		assert.deepEqual(CUE_STATES, ['OFF', 'STANDBY', 'GO'])

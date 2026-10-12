@@ -1,8 +1,3 @@
-// Unit tests for connection handling: host/port validation, reconnect
-// decisions, error mapping, and the ControlSocket's handshake timeout,
-// command pruning and staleness semantics against a local ws server.
-//
-//   npm run test:unit
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 import http from 'node:http'
@@ -107,7 +102,6 @@ describe('connection error messages', () => {
 	})
 })
 
-/** A ws server on an ephemeral port; `onConnection` sees each socket. */
 async function wsServer(onConnection) {
 	const server = http.createServer()
 	const wss = new WebSocketServer({ server, path: '/v1/socket' })

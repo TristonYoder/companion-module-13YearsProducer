@@ -32,11 +32,6 @@ function chunk(type: string, data: Buffer): Buffer {
 
 const cache = new Map<number, string>()
 
-/**
- * A 72x72 transparent PNG with a horizontal progress bar near the bottom edge:
- * a dim track with the filled part in green. Cached per whole percent — there
- * are only 101 distinct images.
- */
 export function progressBarPng(pct: number): string {
 	const clamped = Math.max(0, Math.min(100, Math.round(pct)))
 	const cached = cache.get(clamped)

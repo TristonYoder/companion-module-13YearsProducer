@@ -20,25 +20,9 @@ export interface ActionDeps {
 	api: ControlApi
 	state: ModuleState
 	log: (level: 'info' | 'warn' | 'error' | 'debug', message: string) => void
-	/**
-	 * Pushes variable values and re-runs feedbacks right now. Everything else in
-	 * this module changes state on the *app's* side and finds out about it from
-	 * the next socket push — the Timer Entry keypad is the exception: its buffer
-	 * only exists here, so a key press has to announce itself.
-	 */
 	refresh: () => void
 }
 
-/**
- * Catches `ApiError` so a failed press logs instead of throwing into Companion.
- *
- * `explain` is how an action turns a bare status code into something an
- * operator can act on. The API is deliberate about which code it returns —
- * firing a waypoint answers 404 for "no such waypoint" and 409 for "exists but
- * nothing in this week's plan carries it", which call for completely different
- * fixes — and collapsing those into "API error: ..." would throw away the part
- * that matters. Returning undefined falls through to the generic message.
- */
 function guarded(
 	callback: (action: CompanionActionEvent, context: CompanionActionContext) => Promise<void> | void,
 	deps: ActionDeps,
@@ -62,18 +46,12 @@ function guarded(
 				shown = err instanceof Error ? err.message : String(err)
 				deps.log('error', `Action failed: ${shown}`)
 			}
-			// Surfaces on the `last_action_error` variable and `actionFailed` feedback for a few seconds.
 			deps.state.noteActionError(shown)
 			deps.refresh()
 		}
 	}
 }
 
-/**
- * Why a "Go To Waypoint" press did nothing, in the operator's terms. The API
- * names the offending waypoint in the error's `detail` on both codes, so this
- * never has to be told which one was pressed.
- */
 function explainWaypointFailure(err: ApiError): string | undefined {
 	const which = err.detail ? `"${err.detail}"` : 'That waypoint'
 	if (err.status === 404) {
@@ -92,16 +70,10 @@ const START_TIMER_OPTION = {
 	default: true,
 } as const
 
-/**
- * "Start the timer on arrival", where a missing value means ticked: a button
- * saved before the option existed has no value, and used to get the app's own
- * default (start the clock).
- */
 export function startTimerOption(options: { startTimer?: unknown }): boolean {
 	return options.startTimer === undefined || options.startTimer === null ? true : Boolean(options.startTimer)
 }
 
-/** A parsable date-time as `YYYY-MM-DDTHH:MM:SSZ` (the app's ISO-8601 parser takes no fractional seconds), or `null`. */
 export function isoWithoutFraction(text: string): string | null {
 	const ms = Date.parse(text.trim())
 	if (Number.isNaN(ms)) return null
@@ -119,7 +91,6 @@ const REPEAT_GUARD_OPTION = {
 	max: 10000,
 } as const
 
-/** The keys of the app's grid that simply append themselves to the buffer: digits, the unit suffixes, and the `:` separator. */
 const TIMER_ENTRY_APPEND_KEYS = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'h', 'm', 's', ':']
 
 export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitions {
@@ -182,11 +153,6 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 			}, deps),
 		},
 
-		// The toggle a single template button presses through: Standby → Go! →
-		// Clear → Standby → … The next state is read off the SAME live cue
-		// state a feedback like roleCueColor paints the button with — press
-		// the button, and whatever it's currently showing decides what it
-		// becomes next, rather than the button needing a fixed target state.
 		cycleRoleCue: {
 			name: 'Cycle Role Cue (Standby → Go! → Clear)',
 			options: [
@@ -317,14 +283,6 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 			}, deps),
 		},
 
-		// MARK: - Timer entry keypad
-		//
-		// The app's calculator-style time-entry popover (TimeEntryPopover.swift)
-		// spread across physical buttons: every key edits one shared buffer in
-		// this module (`state.timerEntryBuffer`), and only Enter talks to the
-		// app — posting the raw typed text to `POST /v1/timer/remaining` so the
-		// app's own parser, not this module, decides what it meant.
-
 		timerEntryAppend: {
 			name: 'Timer Entry: Append Key',
 			options: [
@@ -334,9 +292,6 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 					label: 'Key',
 					choices: TIMER_ENTRY_APPEND_KEYS.map((key) => ({ id: key, label: key })),
 					default: '0',
-					// Custom text appends whole fragments ("30s", "1h") from one
-					// button, for a pad that wants shortcuts the app's grid has no
-					// room for.
 					allowCustom: true,
 				},
 			],
@@ -384,11 +339,6 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 			}, deps),
 		},
 
-		// Enter. An empty or unparseable buffer commits nothing — same as the
-		// popover, where Return on junk just dismisses. The buffer is cleared
-		// either way *except* when the post itself fails (a 409 because no plan
-		// is loaded or no item is active, say): there's nothing to re-type in
-		// that case, so what was typed is kept for a second press.
 		timerEntryCommit: {
 			name: 'Timer Entry: Enter (Commit)',
 			options: [],
@@ -605,7 +555,6 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 				if (itemType) body.itemType = itemType
 				if (lengthInSeconds) body.lengthInSeconds = lengthInSeconds
 				if (noteCategoryId) {
-					// The app takes the whole notes map, so merge into what the item holds rather than replacing the other categories.
 					const held = deps.state.plan?.items.find((i) => i.id === itemId)?.notes ?? {}
 					body.notes = { ...held, [noteCategoryId]: optString(action.options.noteText) }
 				}
@@ -1122,8 +1071,6 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 			}, deps),
 		},
 
-		// MARK: - Projected / Actual
-
 		timerActualToggle: {
 			name: 'Toggle Projected/Actual (live item)',
 			description:
@@ -1135,9 +1082,6 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 					deps.log('warn', 'No active plan item to toggle Projected/Actual on.')
 					return
 				}
-				// Read the *displayed* value, not the plan item's own flag: an
-				// override may already be in force, and toggling against the plan
-				// would make the first press appear to do nothing.
 				await deps.api.timerActualOverride(!timer.isDurationActualForDisplay)
 			}, deps),
 		},
@@ -1172,8 +1116,6 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 			}, deps),
 		},
 
-		// MARK: - Notifications
-
 		dismissNotification: {
 			name: 'Dismiss Standing Notification',
 			description:
@@ -1183,8 +1125,6 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 				await deps.api.dismissNotification()
 			}, deps),
 		},
-
-		// MARK: - Waypoints
 
 		waypointGo: {
 			name: 'Go To Waypoint',
@@ -1197,8 +1137,6 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 					label: 'Waypoint',
 					choices: waypointChoices,
 					default: waypointChoices[0]?.id ?? '',
-					// Custom allowed on purpose: a button is often authored
-					// against a waypoint name the producer hasn\u2019t created yet.
 					allowCustom: true,
 				},
 				{
@@ -1386,8 +1324,6 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 				await deps.api.setPlanItemWaypoints(itemId, waypoints)
 			}, deps),
 		},
-
-		// MARK: - Service schedules
 
 		scheduleCreate: {
 			name: 'Create Schedule',
