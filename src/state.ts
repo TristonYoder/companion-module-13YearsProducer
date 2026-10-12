@@ -1,5 +1,5 @@
 import { ClockSync, anchorElapsedMs, anchorElapsedSeconds, anchorRemainingSeconds, monotonicEpochNow } from './sync.js'
-import { formatDuration, parseTimerInput, previewText, signOf, withSign } from './timerEntry.js'
+import { formatDuration, parseTimerInput, previewText, resolvedSeconds, signOf, withSign } from './timerEntry.js'
 import type { TimerEntrySign, TimerInputAction } from './timerEntry.js'
 import type {
 	ActiveTimer,
@@ -464,6 +464,19 @@ export class ModuleState {
 			threshold,
 			timer ? this.timerElapsedSeconds : 0,
 		)
+	}
+
+	get timerEntryResultSeconds(): number | null {
+		const action = this.timerEntryAction
+		if (!action) return null
+		const timer = this.timer
+		if (action.kind === 'adjustRelative' && !timer) return null
+		const seconds = resolvedSeconds(
+			action,
+			timer ? (this.timerRemainingSeconds ?? 0) : 0,
+			timer ? this.timerElapsedSeconds : 0,
+		)
+		return seconds < 0 ? null : seconds
 	}
 
 	formatSeconds(seconds: number): string {

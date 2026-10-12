@@ -24,9 +24,14 @@ On a v2 link:
 
 ### The Timer Entry keypad
 
+
 The **Timer Entry** presets recreate the app's calculator-style time-entry popover (`TimeEntryPopover.swift`) on physical buttons. The typed buffer lives in this module's own state, not on a surface, so every key, the screen readout, and the feedbacks all read the same buffer however the keys are spread across pages or surfaces.
 
 Enter does not parse anything: it posts the raw typed text to `POST /v1/timer/remaining` as `{"input": "…"}`, which the app runs through the very parser its own time field uses — so a macro pad and the producer's keyboard can't disagree about what `4350` or `+2m3s` means. `src/timerEntry.ts` _is_ a TypeScript port of that parser, but only the preview line uses it: the worst a drift there can do is show a wrong preview, never send a wrong command. `unit/timerEntry.test.mjs` runs the same cases the app's own `TimerInputParserTests` do.
+
+**Using the entry elsewhere.** `$(13yearsproducer:timer_entry_result)` is the time the entry would leave (`03:00`) and `timer_entry_result_seconds` the same in seconds; both are empty while the buffer is empty or not a time. `timer_entry_preview` is the two-line display text, and the length fields below also accept it.
+
+**Item lengths.** The Length field of **Plan Add Item** and **Plan Update Item** is text with variable support (global, custom or local). It reads plain seconds (`90`), `mm:ss` (`1:30`), `h:mm:ss` (`1:02:03`) or unit suffixes (`5m`, `1h2m3s`), up to 24 hours. Empty or `0` leaves the length unchanged on update. Older buttons that stored a number are converted by an upgrade script.
 
 Companion presets are single buttons — nothing can span two cells — so the popover's double-tall Enter and double-wide `0` are ordinary one-cell buttons here. Backspace, which the popover only offers from a physical keyboard, takes the cell that frees up. Each preset's name carries its row and column (`R2C4 • −`) so the pad can be dropped onto a page in grid order.
 

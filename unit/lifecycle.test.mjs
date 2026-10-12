@@ -9,7 +9,7 @@ const { normalizeHost, resolveConnection, connectionChanged, describeConnectionE
 const { ControlSocket, ControlApi, ApiError } = await import('../dist/api.js')
 const { ModuleState } = await import('../dist/state.js')
 const { getVariableValues } = await import('../dist/variables.js')
-const { startTimerDefaultUpgrade, upgradeScripts } = await import('../dist/upgrades.js')
+const { startTimerDefaultUpgrade, lengthTextUpgrade, upgradeScripts } = await import('../dist/upgrades.js')
 
 describe('host and port', () => {
 	test('trims, accepts names and IPv4, brackets IPv6', () => {
@@ -306,9 +306,30 @@ describe('startTimer upgrade', () => {
 	})
 
 	test('is registered, and a second run has nothing left to do', () => {
-		assert.deepEqual(upgradeScripts, [startTimerDefaultUpgrade])
+		assert.deepEqual(upgradeScripts, [startTimerDefaultUpgrade, lengthTextUpgrade])
 		const actions = [act('planNext', {})]
 		run(actions)
 		assert.deepEqual(run(actions).updatedActions, [])
+	})
+})
+
+describe('lengthTextUpgrade', () => {
+	const act = (actionId, options) => ({ id: 'a', controlId: 'c', actionId, options })
+	const run = (actions) => lengthTextUpgrade({}, { config: null, secrets: null, actions, feedbacks: [] })
+
+	test('numeric lengths become text, zero becomes empty, other actions are untouched', () => {
+		const actions = [
+			act('planAddItem', { lengthInSeconds: 300 }),
+			act('planUpdateItem', { lengthInSeconds: 0 }),
+			act('planUpdateItem', { lengthInSeconds: 90 }),
+			act('timerAdjust', { seconds: 30 }),
+		]
+		const result = run(actions)
+		assert.equal(result.updatedActions.length, 3)
+		assert.deepEqual(
+			actions.map((a) => a.options.lengthInSeconds),
+			['300', '', '90', undefined],
+		)
+		assert.equal(run(actions).updatedActions.length, 0)
 	})
 })

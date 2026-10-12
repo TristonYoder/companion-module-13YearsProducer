@@ -54,6 +54,8 @@ export function getVariableDefinitions(state: ModuleState): CompanionVariableDef
 
 		{ variableId: 'timer_entry_buffer', name: 'Timer Entry Buffer (what the keypad has typed)' },
 		{ variableId: 'timer_entry_preview', name: 'Timer Entry Preview (what committing it would read)' },
+		{ variableId: 'timer_entry_result', name: 'Timer Entry Result (resulting remaining time, e.g. 03:00)' },
+		{ variableId: 'timer_entry_result_seconds', name: 'Timer Entry Result in Seconds' },
 
 		{ variableId: 'selected_role_names', name: 'Selected Role Names' },
 		{ variableId: 'role_count', name: 'Role Count' },
@@ -179,6 +181,9 @@ export function getVariableValues(state: ModuleState): CompanionVariableValues {
 
 		timer_entry_buffer: state.timerEntryBuffer,
 		timer_entry_preview: state.timerEntryPreview,
+		timer_entry_result:
+			state.timerEntryResultSeconds === null ? '' : state.formatSeconds(state.timerEntryResultSeconds),
+		timer_entry_result_seconds: state.timerEntryResultSeconds ?? '',
 
 		selected_role_names: state.selectedRoleIds
 			.map((id) => state.roleById(id)?.name)
