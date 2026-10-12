@@ -5,6 +5,7 @@ import type {
 	ControlAPIErrorBody,
 	ControlAPIState,
 	CueStateValue,
+	DigestData,
 	HealthInfo,
 	IdentifiedName,
 	InterTeamMessage,
@@ -21,6 +22,7 @@ import type {
 	SettingsStatus,
 	ServerEvent,
 	StartTimerBody,
+	SyncReplyData,
 	TimerRemainingBody,
 	TimerSnapshot,
 	PlanItemWaypointsBody,
@@ -142,6 +144,11 @@ export class ControlApi {
 	/** The timer alone — the slim shape of the socket's `timer` event. */
 	async getTimer(): Promise<TimerSnapshot> {
 		return this.get('/timer')
+	}
+
+	/** Sync protocol v2 time exchange: echoes `t0` with the app's receive (`t1`) and send (`t2`) times. Read-only. */
+	async sync(t0: number): Promise<SyncReplyData> {
+		return this.request('/sync', { method: 'POST', body: JSON.stringify({ t0 }) })
 	}
 
 	// MARK: Roles & selection
@@ -522,6 +529,8 @@ export interface ControlSocketHandlers {
 	onState?: (state: ControlAPIState) => void
 	onMessage?: (message: InterTeamMessage) => void
 	onTimer?: (timer: TimerSnapshot) => void
+	/** Sync protocol v2: the periodic section hashes (also a heartbeat). */
+	onDigest?: (digest: DigestData) => void
 	/** Any inbound traffic at all, pongs included — proof the link is alive. */
 	onFrame?: () => void
 	onOpen?: () => void
@@ -533,6 +542,8 @@ const RECONNECT_DELAY_MS = 3000
 const PING_INTERVAL_MS = 5000
 /** No frame or pong for this long and the socket is treated as half-open (e.g. the Mac slept) and torn down. */
 const PONG_DEADLINE_MS = 12000
+/** The same deadline on a sync protocol v2 socket, where digests arrive every 10 s and nothing else is pushed while idle. */
+const PONG_DEADLINE_MS_V2 = 25000
 
 /**
  * The WebSocket half of the Control API — `ws://host:port/v1/socket`. This is
@@ -553,6 +564,7 @@ export class ControlSocket {
 	private nextCommandId = 1
 	private keepaliveTimer: ReturnType<typeof setInterval> | undefined
 	private lastInboundAt = 0
+	private pongDeadlineMs = PONG_DEADLINE_MS
 
 	constructor(
 		private getConfig: () => ResolvedApiConfig,
@@ -561,6 +573,11 @@ export class ControlSocket {
 
 	get isOpen(): boolean {
 		return this.ws?.readyState === WebSocket.OPEN
+	}
+
+	/** Widens (or restores) the half-open deadline once the app has acknowledged sync protocol v2. */
+	setProtocolV2(enabled: boolean): void {
+		this.pongDeadlineMs = enabled ? PONG_DEADLINE_MS_V2 : PONG_DEADLINE_MS
 	}
 
 	connect(): void {
@@ -581,7 +598,7 @@ export class ControlSocket {
 		this.pending.clear()
 	}
 
-	/** Send a command over the socket instead of REST (`op` is the dotted route form, e.g. `plan.next`). Not used by this module's own actions today — REST is simpler to reason about and to test — but kept public since the protocol supports it symmetrically. */
+	/** Send a command over the socket instead of REST (`op` is the dotted route form, e.g. `plan.next`). Not used by this module's actions — REST is simpler to reason about and to test — but the sync protocol's `proto` and `sync` ops go through it. */
 	async sendCommand(op: string, body?: unknown): Promise<CommandReply> {
 		if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
 			return Promise.reject(new Error('Socket is not connected'))
@@ -601,6 +618,7 @@ export class ControlSocket {
 		this.ws = ws
 
 		ws.on('open', () => {
+			this.pongDeadlineMs = PONG_DEADLINE_MS
 			this.startKeepalive(ws)
 			this.handlers.onOpen?.()
 		})
@@ -635,7 +653,7 @@ export class ControlSocket {
 		this.stopKeepalive()
 		this.lastInboundAt = Date.now()
 		this.keepaliveTimer = setInterval(() => {
-			if (Date.now() - this.lastInboundAt > PONG_DEADLINE_MS) {
+			if (Date.now() - this.lastInboundAt > this.pongDeadlineMs) {
 				this.handlers.onError?.(new Error('No reply to keepalive — reconnecting'))
 				ws.terminate()
 				return

@@ -91,7 +91,7 @@ export function getFeedbackDefinitions(state: ModuleState): CompanionFeedbackDef
 				color: combineRgb(255, 255, 255),
 			},
 			callback: () => {
-				return state.timer?.isOvertime === true
+				return state.timerIsOvertime
 			},
 		},
 
@@ -113,9 +113,10 @@ export function getFeedbackDefinitions(state: ModuleState): CompanionFeedbackDef
 				color: combineRgb(255, 255, 255),
 			},
 			callback: (feedback) => {
-				if (!state.timer) return false
+				const remaining = state.timerRemainingSeconds
+				if (remaining === null) return false
 				const threshold = Number(feedback.options.thresholdSeconds)
-				return state.timer.remainingSeconds <= threshold
+				return remaining <= threshold
 			},
 		},
 

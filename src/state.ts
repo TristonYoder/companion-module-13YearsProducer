@@ -1,3 +1,4 @@
+import { ClockSync, anchorElapsedMs, anchorElapsedSeconds, anchorRemainingSeconds } from './sync.js'
 import { formatDuration, parseTimerInput, previewText, signOf, withSign } from './timerEntry.js'
 import type { TimerEntrySign, TimerInputAction } from './timerEntry.js'
 import type {
@@ -13,6 +14,7 @@ import type {
 	ScheduleEntry,
 	ScheduleStatus,
 	SettingsStatus,
+	TimerAnchor,
 	TimerSnapshot,
 	WaypointStatus,
 } from './types.js'
@@ -25,6 +27,9 @@ export const RUNDOWN_ROWS = 8
 
 /** A socket that has delivered nothing (not even a pong) for longer than this, while "connected", is stale. */
 export const STALE_AFTER_MS = 5000
+
+/** Sync protocol v2 sockets get a digest every 10 s and push nothing else while idle, so quiet is normal for much longer. */
+export const STALE_AFTER_MS_V2 = 25000
 
 /** Turns a role name into a variable/preset-id-safe slug (lowercase, underscores). */
 export function slugify(text: string): string {
@@ -79,7 +84,19 @@ export class ModuleState {
 	/** Zero-based page of the Rundown rows. */
 	rundownPage = 0
 
-	constructor(private clock: () => number = Date.now) {}
+	/** Negotiated sync protocol: 2 once the app acknowledged `proto`, 1 (legacy, 1 Hz timer pushes) otherwise. */
+	protoVersion: 1 | 2 = 1
+	readonly sync: ClockSync
+
+	constructor(readonly clock: () => number = Date.now) {
+		this.sync = new ClockSync(clock)
+	}
+
+	/** Records the negotiated protocol; dropping back to legacy also forgets the measured clock offset. */
+	setProtoVersion(version: 1 | 2): void {
+		this.protoVersion = version
+		if (version === 1) this.sync.reset()
+	}
 
 	/** Drops the revision guard — for a `hello`/prime read, since a restarted app counts from the start again. */
 	resetRev(): void {
@@ -110,9 +127,14 @@ export class ModuleState {
 		return true
 	}
 
-	/** The app's idea of "now", corrected by the last offset it reported. */
+	/** The app's idea of "now": the measured sync offset when there is one, else the one its last stamped snapshot implied. */
 	get nowMs(): number {
-		return this.clock() + this.serverOffsetMs
+		return this.sync.hasOffset ? this.sync.producerNowMs() : this.clock() + this.serverOffsetMs
+	}
+
+	/** Same as `nowMs`, named for the protocol's term. */
+	producerNowMs(): number {
+		return this.nowMs
 	}
 
 	markFrame(): void {
@@ -120,7 +142,11 @@ export class ModuleState {
 	}
 
 	get isStale(): boolean {
-		return this.isSocketConnected && this.lastFrameAt !== null && this.clock() - this.lastFrameAt > STALE_AFTER_MS
+		return this.isSocketConnected && this.lastFrameAt !== null && this.clock() - this.lastFrameAt > this.staleAfterMs
+	}
+
+	get staleAfterMs(): number {
+		return this.protoVersion === 2 ? STALE_AFTER_MS_V2 : STALE_AFTER_MS
 	}
 
 	applyMessage(message: InterTeamMessage): void {
@@ -143,6 +169,44 @@ export class ModuleState {
 
 	get timer(): ActiveTimer | null {
 		return this.snapshot?.timer ?? null
+	}
+
+	// MARK: - Timer (anchor-driven on v2)
+
+	/** The anchor to run locally: only on a v2 link, only when the app sent one. Legacy links use the pushed values. */
+	get timerAnchor(): TimerAnchor | null {
+		if (this.protoVersion !== 2) return null
+		return this.snapshot?.timer?.anchor ?? null
+	}
+
+	/** Remaining seconds of the live item (negative in overtime). Computed from the anchor on v2, the pushed `remainingSeconds` otherwise. `null` without a live timer. */
+	get timerRemainingSeconds(): number | null {
+		const timer = this.timer
+		if (!timer) return null
+		const anchor = this.timerAnchor
+		return anchor ? anchorRemainingSeconds(anchor, this.nowMs) : timer.remainingSeconds
+	}
+
+	/** Whole seconds elapsed on the live item. */
+	get timerElapsedSeconds(): number {
+		const timer = this.timer
+		if (!timer) return 0
+		const anchor = this.timerAnchor
+		return anchor ? anchorElapsedSeconds(anchor, this.nowMs) : (timer.item?.elapsedSeconds ?? 0)
+	}
+
+	get timerIsOvertime(): boolean {
+		const remaining = this.timerRemainingSeconds
+		if (remaining === null) return false
+		return this.timerAnchor ? remaining < 0 : this.timer?.isOvertime === true
+	}
+
+	/** The countdown as the app writes it. Formatted here on v2 (the same `TimeFormatting` port the preview uses), the pushed string otherwise. */
+	get timerFormattedRemaining(): string {
+		const timer = this.timer
+		if (!timer) return ''
+		const remaining = this.timerRemainingSeconds
+		return this.timerAnchor && remaining !== null ? this.formatSeconds(remaining) : timer.formattedRemaining
 	}
 
 	get plan(): PlanStatus | null {
@@ -295,7 +359,7 @@ export class ModuleState {
 	/**
 	 * The preview line: what the active item's remaining time would read as if
 	 * the buffer were committed right now, in the app's own format. Computed from
-	 * the last pushed countdown value, so it only moves when a push arrives; blank
+	 * the countdown (anchor-driven on a v2 link, the last pushed value otherwise); blank
 	 * whenever there's nothing to preview (including a relative entry with no
 	 * active timer).
 	 */
@@ -304,9 +368,9 @@ export class ModuleState {
 		const timer = this.timer
 		return previewText(
 			this.timerEntryBuffer,
-			timer ? timer.remainingSeconds : null,
+			timer ? this.timerRemainingSeconds : null,
 			threshold,
-			timer?.item?.elapsedSeconds ?? 0,
+			timer ? this.timerElapsedSeconds : 0,
 		)
 	}
 
@@ -322,13 +386,21 @@ export class ModuleState {
 		const plan = this.plan
 		if (!timer || !plan) return null
 		const after = plan.items.slice(plan.activeItemIndex + 1).reduce((sum, item) => sum + item.lengthInSeconds, 0)
-		return Math.max(0, timer.remainingSeconds) + after
+		return Math.max(0, this.timerRemainingSeconds ?? 0) + after
 	}
 
 	/** Epoch ms the plan is projected to end, on the app's clock. */
 	get projectedEndMs(): number | null {
 		const remaining = this.serviceRemainingSeconds
-		return remaining === null ? null : this.nowMs + remaining * 1000
+		if (remaining === null) return null
+		const anchor = this.timerAnchor
+		if (anchor) {
+			// Sub-second exact, so the projection holds still between ticks instead of shrinking by the fraction already elapsed.
+			const now = this.nowMs
+			const liveMs = Math.max(0, anchor.lengthInSeconds * 1000 - anchorElapsedMs(anchor, now))
+			return now + liveMs + (remaining - Math.max(0, this.timerRemainingSeconds ?? 0)) * 1000
+		}
+		return this.nowMs + remaining * 1000
 	}
 
 	/** `HH:MM` in this machine's local time. */
@@ -356,7 +428,7 @@ export class ModuleState {
 	get activeItemProgressPct(): number {
 		const item = this.timer?.item
 		if (!item || !(item.lengthInSeconds > 0)) return 0
-		return Math.max(0, Math.min(100, Math.round((item.elapsedSeconds / item.lengthInSeconds) * 100)))
+		return Math.max(0, Math.min(100, Math.round((this.timerElapsedSeconds / item.lengthInSeconds) * 100)))
 	}
 
 	// MARK: - Rundown paging

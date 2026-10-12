@@ -1,4 +1,10 @@
-import { InstanceBase, InstanceStatus, runEntrypoint, type SomeCompanionConfigField } from '@companion-module/base'
+import {
+	InstanceBase,
+	InstanceStatus,
+	runEntrypoint,
+	type CompanionVariableValues,
+	type SomeCompanionConfigField,
+} from '@companion-module/base'
 import { ApiError, ControlApi, ControlSocket } from './api.js'
 import { getConfigFields, type ModuleConfig } from './config.js'
 import { getActionDefinitions, type ActionDeps } from './actions.js'
@@ -6,13 +12,23 @@ import { getFeedbackDefinitions } from './feedbacks.js'
 import { getVariableDefinitions, getVariableValues } from './variables.js'
 import { getPresetDefinitions } from './presets.js'
 import { ModuleState } from './state.js'
+import { SyncSession } from './session.js'
 import type { ControlAPIState } from './types.js'
+
+/** Variables the countdown-driven feedbacks (`timerOvertime`, `timerUnderThreshold`, the progress bar) follow. */
+const TIMER_FEEDBACK_VARIABLES = new Set([
+	'active_item_remaining_seconds',
+	'active_item_is_overtime',
+	'active_item_progress_pct',
+])
 
 class ThirteenYearsProducerInstance extends InstanceBase<ModuleConfig> {
 	private config!: ModuleConfig
 	private api!: ControlApi
 	private socket!: ControlSocket
 	private state = new ModuleState()
+	private session!: SyncSession
+	private lastVariableValues: CompanionVariableValues = {}
 	private definitionSignature = ''
 	private staleTimer: ReturnType<typeof setInterval> | undefined
 	private wasStale = false
@@ -26,18 +42,23 @@ class ThirteenYearsProducerInstance extends InstanceBase<ModuleConfig> {
 		this.socket = new ControlSocket(() => this.resolvedConfig(), {
 			onOpen: () => {
 				this.log('info', 'Connected to Control API socket')
+				void this.session.start()
 			},
 			onHello: (snapshot) => this.handleSnapshot(snapshot, true),
 			onState: (snapshot) => this.handleSnapshot(snapshot),
 			onTimer: (timer) => {
-				if (this.state.applyTimer(timer)) this.pushDerivedState()
+				if (!this.state.applyTimer(timer)) return
+				this.session.scheduleTick()
+				this.pushDerivedState()
 			},
+			onDigest: (digest) => void this.session.handleDigest(digest),
 			onFrame: () => this.state.markFrame(),
 			onMessage: (message) => {
 				this.state.applyMessage(message)
 				this.pushDerivedState()
 			},
 			onClose: () => {
+				this.session.stop()
 				this.state.setSocketConnected(false)
 				this.updateStatus(InstanceStatus.Disconnected, 'Control socket closed — reconnecting')
 				this.pushDerivedState()
@@ -45,6 +66,16 @@ class ThirteenYearsProducerInstance extends InstanceBase<ModuleConfig> {
 			onError: (err) => {
 				this.log('warn', `Control socket error: ${err.message}`)
 			},
+		})
+
+		this.session = new SyncSession({
+			state: this.state,
+			sendCommand: async (op, body) => this.socket.sendCommand(op, body),
+			fetchState: async () => this.api.getState(),
+			adopt: (snapshot) => this.applyReply(snapshot),
+			onChange: () => this.pushTimerState(),
+			onProtocol: (version) => this.socket.setProtocolV2(version === 2),
+			log: (level, message) => this.log(level, message),
 		})
 
 		this.refreshDynamicDefinitions(true)
@@ -57,12 +88,14 @@ class ThirteenYearsProducerInstance extends InstanceBase<ModuleConfig> {
 
 	async destroy(): Promise<void> {
 		if (this.staleTimer) clearInterval(this.staleTimer)
+		this.session?.stop()
 		this.socket?.close()
 	}
 
 	async configUpdated(config: ModuleConfig): Promise<void> {
 		this.config = config
 		this.refreshDynamicDefinitions(true)
+		this.session.stop()
 		this.socket.close()
 		this.updateStatus(InstanceStatus.Connecting)
 		await this.primeAndConnect()
@@ -94,9 +127,32 @@ class ThirteenYearsProducerInstance extends InstanceBase<ModuleConfig> {
 		this.pushDerivedState()
 	}
 
+	/** Sends only the variables whose value moved since the last push. */
+	private pushVariables(): string[] {
+		const values = getVariableValues(this.state)
+		const changed: CompanionVariableValues = {}
+		const keys: string[] = []
+		for (const [key, value] of Object.entries(values)) {
+			if (this.lastVariableValues[key] === value) continue
+			changed[key] = value
+			keys.push(key)
+		}
+		this.lastVariableValues = values
+		if (keys.length > 0) this.setVariableValues(changed)
+		return keys
+	}
+
 	private pushDerivedState(): void {
-		this.setVariableValues(getVariableValues(this.state))
+		this.pushVariables()
 		this.checkFeedbacks()
+	}
+
+	/** The local timer ticked, or a clock sample landed: nothing but the countdown-derived values can have moved, so only those feedbacks are re-evaluated, and only if a variable they follow changed. */
+	private pushTimerState(): void {
+		const changed = this.pushVariables()
+		if (changed.some((key) => TIMER_FEEDBACK_VARIABLES.has(key))) {
+			this.checkFeedbacks('timerOvertime', 'timerUnderThreshold', 'activeItemProgressBar')
+		}
 	}
 
 	/**
@@ -132,6 +188,7 @@ class ThirteenYearsProducerInstance extends InstanceBase<ModuleConfig> {
 		if (!this.state.applyState(snapshot)) return
 		this.updateStatus(InstanceStatus.Ok)
 		this.refreshDynamicDefinitions()
+		this.session.scheduleTick()
 		this.pushDerivedState()
 	}
 
@@ -139,6 +196,7 @@ class ThirteenYearsProducerInstance extends InstanceBase<ModuleConfig> {
 	private applyReply(snapshot: ControlAPIState): void {
 		if (!this.state.applyState(snapshot)) return
 		this.refreshDynamicDefinitions()
+		this.session.scheduleTick()
 		this.pushDerivedState()
 	}
 
@@ -150,6 +208,7 @@ class ThirteenYearsProducerInstance extends InstanceBase<ModuleConfig> {
 		const signature = `${this.state.dynamicSignature()}|${overtimeRed}`
 		if (!force && signature === this.definitionSignature) return
 		this.definitionSignature = signature
+		this.lastVariableValues = {}
 		this.setActionDefinitions(getActionDefinitions(this.actionDeps()))
 		this.setFeedbackDefinitions(getFeedbackDefinitions(this.state))
 		this.setVariableDefinitions(getVariableDefinitions(this.state))

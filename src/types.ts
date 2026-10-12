@@ -142,6 +142,22 @@ export interface NetworkStatus {
 	relayHost: string
 }
 
+/**
+ * Sync protocol v2 timer anchor (PROTOCOL-V2.md): `elapsedMs` was true at
+ * `anchorMs` on the app's clock; a running timer advances from there, so a
+ * client can render the countdown itself with no further pushes.
+ */
+export interface TimerAnchor {
+	itemId: string
+	lengthInSeconds: number
+	/** Elapsed time at `anchorMs`, in ms. */
+	elapsedMs: number
+	/** App epoch ms at which `elapsedMs` was true. */
+	anchorMs: number
+	isRunning: boolean
+	isDurationActual: boolean
+}
+
 export interface ActiveTimer {
 	item: PCOTimerItem
 	index: number
@@ -151,6 +167,8 @@ export interface ActiveTimer {
 	/** The exact string the app's own screen shows (`TimeFormatting.string`). */
 	formattedRemaining: string
 	isDurationActualForDisplay: boolean
+	/** Present on apps that speak sync protocol v2; absent on older ones. */
+	anchor?: TimerAnchor | null
 }
 
 export interface PlanStatus {
@@ -356,7 +374,33 @@ export interface TimerEvent {
 	data: TimerSnapshot
 }
 
-export type ServerEvent = HelloEvent | StateEvent | MessageEvent | TimerEvent
+/** Section hashes of sync protocol v2 (16 lowercase hex digits each). */
+export interface DigestHashes {
+	roles: string
+	timer: string
+	plan: string
+	messages: string
+}
+
+export interface DigestData {
+	rev?: number
+	serverNowMs?: number
+	hashes: DigestHashes
+}
+
+export interface DigestEvent {
+	event: 'digest'
+	data: DigestData
+}
+
+export type ServerEvent = HelloEvent | StateEvent | MessageEvent | TimerEvent | DigestEvent
+
+/** Reply `data` of the socket op `sync` and `POST /v1/sync`. */
+export interface SyncReplyData {
+	t0: number
+	t1: number
+	t2: number
+}
 
 /** Client-to-server command envelope. `op` is the dotted form of a REST path (`plan.next`, `roles.{id}.cue`). */
 export interface CommandEnvelope {
