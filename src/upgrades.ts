@@ -13,4 +13,20 @@ export const startTimerDefaultUpgrade: CompanionStaticUpgradeScript<ModuleConfig
 	return { updatedConfig: null, updatedSecrets: null, updatedActions, updatedFeedbacks: [] }
 }
 
-export const upgradeScripts: CompanionStaticUpgradeScript<ModuleConfig>[] = [startTimerDefaultUpgrade]
+export const LENGTH_TEXT_ACTIONS = ['planAddItem', 'planUpdateItem']
+
+export const lengthTextUpgrade: CompanionStaticUpgradeScript<ModuleConfig> = (_context, props) => {
+	const updatedActions = props.actions.filter(
+		(action) => LENGTH_TEXT_ACTIONS.includes(action.actionId) && typeof action.options.lengthInSeconds === 'number',
+	)
+	for (const action of updatedActions) {
+		const seconds = action.options.lengthInSeconds as number
+		action.options.lengthInSeconds = seconds > 0 ? String(seconds) : ''
+	}
+	return { updatedConfig: null, updatedSecrets: null, updatedActions, updatedFeedbacks: [] }
+}
+
+export const upgradeScripts: CompanionStaticUpgradeScript<ModuleConfig>[] = [
+	startTimerDefaultUpgrade,
+	lengthTextUpgrade,
+]

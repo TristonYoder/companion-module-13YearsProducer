@@ -1,8 +1,16 @@
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 
-const { formatDuration, parseTimerInput, previewText, resolvedSeconds, signOf, withSign } =
-	await import('../dist/timerEntry.js')
+const {
+	formatDuration,
+	parseTimerInput,
+	previewText,
+	resolvedSeconds,
+	signOf,
+	withSign,
+	parseDurationText,
+	lengthFromOption,
+} = await import('../dist/timerEntry.js')
 const { ModuleState } = await import('../dist/state.js')
 
 const absolute = (seconds) => ({ kind: 'setAbsolute', seconds })
@@ -234,5 +242,85 @@ describe('ModuleState timer entry buffer', () => {
 		})
 		for (const key of ['-', '6', '0', 's']) state.appendTimerEntry(key)
 		assert.equal(state.timerEntryPreview, '-01:00\n= +00:40')
+	})
+})
+
+describe('parseDurationText', () => {
+	test('plain digits are seconds, not the keypad positional form', () => {
+		assert.equal(parseDurationText('90'), 90)
+		assert.equal(parseDurationText(' 300 '), 300)
+		assert.equal(parseDurationText('0'), 0)
+	})
+
+	test('mm:ss and h:mm:ss', () => {
+		assert.equal(parseDurationText('1:30'), 90)
+		assert.equal(parseDurationText('05:00'), 300)
+		assert.equal(parseDurationText('90:00'), 5400)
+		assert.equal(parseDurationText('1:02:03'), 3723)
+		assert.equal(parseDurationText('0:45:00'), 2700)
+	})
+
+	test('unit suffixes still work', () => {
+		assert.equal(parseDurationText('5m'), 300)
+		assert.equal(parseDurationText('1h2m3s'), 3723)
+	})
+
+	test('timer entry preview text is accepted, the resulting time wins', () => {
+		assert.equal(parseDurationText('01:30'), 90)
+		assert.equal(parseDurationText('+00:30\n= 03:00'), 180)
+		assert.equal(parseDurationText('-01:00\n= 1:00:00'), 3600)
+	})
+
+	test('rejects junk, signs, out of range parts and overtime results', () => {
+		for (const bad of ['', '   ', 'abc', '1:2:3:4', '1:75', '1:61:00', '+30', '-30', '1.5', '= +00:40', '$NA']) {
+			assert.equal(parseDurationText(bad), null, bad)
+		}
+	})
+})
+
+describe('lengthFromOption', () => {
+	test('empty is allowed only when asked for', () => {
+		assert.equal(lengthFromOption('', { allowEmpty: true }), null)
+		assert.equal(lengthFromOption(undefined, { allowEmpty: true }), null)
+		assert.throws(() => lengthFromOption('', { allowEmpty: false }), /empty/)
+	})
+
+	test('numbers saved by older versions still read as seconds', () => {
+		assert.equal(lengthFromOption(300, { allowEmpty: false }), 300)
+		assert.equal(lengthFromOption(0, { allowEmpty: true }), 0)
+	})
+
+	test('a bad value explains itself and a day is the ceiling', () => {
+		assert.throws(() => lengthFromOption('soon', { allowEmpty: true }), /not a length/)
+		assert.throws(() => lengthFromOption('25:00:00', { allowEmpty: true }), /24 hours/)
+		assert.equal(lengthFromOption('24:00:00', { allowEmpty: true }), 86400)
+	})
+})
+
+describe('timer entry result variables', () => {
+	test('result is the resulting remaining time, empty when it is not a time', async () => {
+		const { getVariableValues } = await import('../dist/variables.js')
+		const state = new ModuleState()
+		assert.equal(getVariableValues(state).timer_entry_result, '')
+		assert.equal(getVariableValues(state).timer_entry_result_seconds, '')
+		state.appendTimerEntry('130')
+		assert.equal(getVariableValues(state).timer_entry_result, '01:30')
+		assert.equal(getVariableValues(state).timer_entry_result_seconds, 90)
+	})
+})
+
+describe('preset variable references', () => {
+	test('every variable a preset reads uses the module shortname and exists', async () => {
+		const { readFileSync } = await import('node:fs')
+		const { getVariableDefinitions } = await import('../dist/variables.js')
+		const manifest = JSON.parse(readFileSync(new URL('../companion/manifest.json', import.meta.url), 'utf8'))
+		const source = readFileSync(new URL('../src/presets.ts', import.meta.url), 'utf8')
+		const defined = new Set(getVariableDefinitions(new ModuleState()).map((d) => d.variableId))
+		const references = [...source.matchAll(/\$\(([^:)]+):([^)]+)\)/g)]
+		assert.ok(references.length > 0)
+		for (const [, label, name] of references) {
+			assert.equal(label, manifest.shortname, name)
+			if (!name.includes('${')) assert.ok(defined.has(name), `${name} is not a defined variable`)
+		}
 	})
 })

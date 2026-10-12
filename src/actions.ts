@@ -14,6 +14,7 @@ import {
 	type PlanItemUpdateBody,
 	type RoleUpdateBody,
 } from './types.js'
+import { lengthFromOption } from './timerEntry.js'
 import type { TimerEntrySign } from './timerEntry.js'
 
 export interface ActionDeps {
@@ -473,12 +474,11 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 					default: 'Item',
 				},
 				{
-					type: 'number',
+					type: 'textinput',
 					id: 'lengthInSeconds',
-					label: 'Length (Seconds)',
-					default: 300,
-					min: 0,
-					max: 86400,
+					label: 'Length (seconds, mm:ss or h:mm:ss; variables allowed)',
+					default: '5:00',
+					useVariables: true,
 				},
 				{
 					type: 'checkbox',
@@ -490,7 +490,7 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 			callback: guarded(async (action) => {
 				const title = optString(action.options.title)
 				const itemType = optString(action.options.itemType)
-				const lengthInSeconds = Number(action.options.lengthInSeconds)
+				const lengthInSeconds = lengthFromOption(optString(action.options.lengthInSeconds), { allowEmpty: false }) ?? 0
 				const isDurationActual = Boolean(action.options.isDurationActual)
 				await deps.api.addPlanItem({ title, itemType, lengthInSeconds, isDurationActual })
 			}, deps),
@@ -519,12 +519,11 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 					default: '',
 				},
 				{
-					type: 'number',
+					type: 'textinput',
 					id: 'lengthInSeconds',
-					label: 'Length (Seconds) — 0 leaves it unchanged',
-					default: 0,
-					min: 0,
-					max: 86400,
+					label: 'Length (seconds, mm:ss or h:mm:ss; variables allowed; empty or 0 leaves it unchanged)',
+					default: '',
+					useVariables: true,
 				},
 				{
 					type: 'dropdown',
@@ -547,7 +546,7 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 				const itemId = optString(action.options.itemId)
 				const title = optString(action.options.title)
 				const itemType = optString(action.options.itemType)
-				const lengthInSeconds = Number(action.options.lengthInSeconds)
+				const lengthInSeconds = lengthFromOption(optString(action.options.lengthInSeconds), { allowEmpty: true })
 				const noteCategoryId = optString(action.options.noteCategoryId)
 
 				const body: PlanItemUpdateBody = {}

@@ -150,3 +150,48 @@ export function signOf(buffer: string): TimerEntrySign | null {
 	if (buffer.startsWith('-')) return '-'
 	return null
 }
+
+export const MAX_LENGTH_SECONDS = 86400
+
+export function parseDurationText(raw: string): number | null {
+	let text = raw.trim()
+	const equals = text.lastIndexOf('=')
+	if (equals !== -1) text = text.slice(equals + 1)
+	text = text.trim()
+	if (!text || text.startsWith('+') || text.startsWith('-')) return null
+
+	if (/^[0-9]+$/.test(text)) return Number(text)
+
+	const units = parseCombinedUnits(text.toLowerCase())
+	if (units !== null) return units
+
+	const parts = text.split(':')
+	if (parts.length < 2 || parts.length > 3) return null
+	if (!parts.every((part) => /^[0-9]+$/.test(part))) return null
+	const numbers = parts.map(Number)
+	if (numbers.length === 3) {
+		const [hours, minutes, seconds] = numbers
+		if (minutes >= 60 || seconds >= 60) return null
+		return hours * 3600 + minutes * 60 + seconds
+	}
+	const [minutes, seconds] = numbers
+	if (seconds >= 60) return null
+	return minutes * 60 + seconds
+}
+
+export function lengthFromOption(
+	raw: string | number | boolean | null | undefined,
+	options: { allowEmpty: boolean },
+): number | null {
+	const text = raw === undefined || raw === null ? '' : String(raw).trim()
+	if (!text) {
+		if (options.allowEmpty) return null
+		throw new Error('Length is empty. Use seconds (90), mm:ss (1:30) or h:mm:ss (1:02:03).')
+	}
+	const seconds = parseDurationText(text)
+	if (seconds === null) {
+		throw new Error(`"${text}" is not a length. Use seconds (90), mm:ss (1:30) or h:mm:ss (1:02:03).`)
+	}
+	if (seconds > MAX_LENGTH_SECONDS) throw new Error(`"${text}" is longer than 24 hours.`)
+	return seconds
+}
