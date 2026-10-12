@@ -73,6 +73,10 @@ SF Symbols would have been the obvious Mac-native alternative and is deliberatel
 used: Apple licenses it only for apps on Apple platforms, and a Companion module runs
 on Windows and Linux too.
 
+## Planning Center and waypoint housekeeping
+
+Beyond cues and timers, the module can clear the selected Planning Center service type (_Select Service Type_ with _Clear selection_), set or clear the remembered default (_Set Default Service Type_), and unassign a waypoint without deleting it (_Unassign Waypoint_). The OAuth sign-in only opens a browser on the device; it cannot be completed from Companion.
+
 ## The API this drives
 
 The Producer app's Control API is documented in `CONTROL-API.md` in the

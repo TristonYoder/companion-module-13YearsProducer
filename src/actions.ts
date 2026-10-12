@@ -662,11 +662,44 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 					choices: serviceTypeChoices,
 					default: serviceTypeChoices[0]?.id ?? '',
 					allowCustom: true,
+					isVisibleExpression: '!$(options:clear)',
+				},
+				{
+					type: 'checkbox',
+					id: 'clear',
+					label: 'Clear selection',
+					default: false,
 				},
 			],
 			callback: guarded(async (action) => {
 				const serviceTypeId = optString(action.options.serviceTypeId)
-				await deps.api.selectPcoServiceType(serviceTypeId)
+				await deps.api.selectPcoServiceType(action.options.clear === true ? null : serviceTypeId)
+			}, deps),
+		},
+
+		pcoSetDefaultServiceType: {
+			name: 'Planning Center Set Default Service Type',
+			description: 'Remembers a service type for next time. Tick Clear default to forget it.',
+			options: [
+				{
+					type: 'dropdown',
+					id: 'serviceTypeId',
+					label: 'Service Type',
+					choices: serviceTypeChoices,
+					default: serviceTypeChoices[0]?.id ?? '',
+					allowCustom: true,
+					isVisibleExpression: '!$(options:clear)',
+				},
+				{
+					type: 'checkbox',
+					id: 'clear',
+					label: 'Clear default',
+					default: false,
+				},
+			],
+			callback: guarded(async (action) => {
+				const serviceTypeId = optString(action.options.serviceTypeId)
+				await deps.api.setPcoDefaultServiceType(action.options.clear === true ? null : serviceTypeId)
 			}, deps),
 		},
 
@@ -1111,6 +1144,24 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 				const ref = optString(action.options.waypoint)
 				const itemId = optString(action.options.itemId)
 				await deps.api.assignWaypoint(ref, itemId || null)
+			}, deps),
+		},
+
+		waypointUnassign: {
+			name: 'Unassign Waypoint',
+			description: 'Takes the waypoint off whatever item carries it this week. The waypoint stays in the library.',
+			options: [
+				{
+					type: 'dropdown',
+					id: 'waypoint',
+					label: 'Waypoint',
+					choices: waypointChoices,
+					default: waypointChoices[0]?.id ?? '',
+					allowCustom: true,
+				},
+			],
+			callback: guarded(async (action) => {
+				await deps.api.assignWaypoint(optString(action.options.waypoint), null)
 			}, deps),
 		},
 

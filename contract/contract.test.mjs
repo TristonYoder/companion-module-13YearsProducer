@@ -248,6 +248,30 @@ describe('timer (reversible)', () => {
 	})
 })
 
+describe('PCO and waypoint edge cases', () => {
+	test('POST /v1/pco/service-type without a body is a 400', async () => {
+		const res = await fetch(`${BASE}/v1/pco/service-type`, { method: 'POST' })
+		if (res.status === 404) return // route absent on this app version
+		assert.equal(res.status, 400)
+	})
+
+	test('default service type route and client method exist', async () => {
+		assert.equal(typeof api.setPcoDefaultServiceType, 'function')
+		assert.equal(typeof api.selectPcoServiceType, 'function')
+		// Mutating the live producer's PCO selection is not a reversible no-op, so only probe the error path.
+		const res = await fetch(`${BASE}/v1/pco/default-service-type`, { method: 'POST' })
+		if (res.status === 404) return
+		assert.equal(res.status, 400)
+	})
+
+	test('unassigning an unknown waypoint is a 404', async () => {
+		await assert.rejects(
+			() => api.assignWaypoint('no-such-waypoint-zzz', null),
+			(err) => err instanceof ApiError && err.status === 404,
+		)
+	})
+})
+
 describe('WebSocket', () => {
 	test('opens, receives a hello event carrying the full state, and closes cleanly', async () => {
 		const received = await new Promise((resolve, reject) => {

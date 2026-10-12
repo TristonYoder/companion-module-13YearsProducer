@@ -11,6 +11,7 @@ const { progressBarPng } = await import('../dist/progress.js')
 const { getPresetDefinitions } = await import('../dist/presets.js')
 const { getVariableValues } = await import('../dist/variables.js')
 const { getFeedbackDefinitions } = await import('../dist/feedbacks.js')
+const { getActionDefinitions } = await import('../dist/actions.js')
 
 function item(id, lengthInSeconds, extra = {}) {
 	return { id, title: `Item ${id}`, itemType: 'item', lengthInSeconds, elapsedSeconds: 0, ...extra }
@@ -302,5 +303,34 @@ describe('preset config gating', () => {
 			assert.ok(presets[id], id)
 		}
 		assert.deepEqual(presets.plan_next_hold.steps[0].down[0].options, { startTimer: false })
+	})
+})
+
+describe('PCO service type and waypoint unassign actions', () => {
+	function run(actionId, options) {
+		const calls = []
+		const api = {
+			selectPcoServiceType: async (id) => calls.push(['select', id]),
+			setPcoDefaultServiceType: async (id) => calls.push(['default', id]),
+			assignWaypoint: async (ref, itemId) => calls.push(['assign', ref, itemId]),
+		}
+		const state = new ModuleState()
+		const defs = getActionDefinitions({ api, state, log: () => {}, refresh: () => {} })
+		return defs[actionId].callback({ options }, {}).then(() => calls)
+	}
+
+	test('select service type selects, and clears when asked (old saved actions still select)', async () => {
+		assert.deepEqual(await run('pcoSelectServiceType', { serviceTypeId: 'st-1' }), [['select', 'st-1']])
+		assert.deepEqual(await run('pcoSelectServiceType', { serviceTypeId: 'st-1', clear: false }), [['select', 'st-1']])
+		assert.deepEqual(await run('pcoSelectServiceType', { serviceTypeId: 'st-1', clear: true }), [['select', null]])
+	})
+
+	test('set default service type selects or clears', async () => {
+		assert.deepEqual(await run('pcoSetDefaultServiceType', { serviceTypeId: 'st-2' }), [['default', 'st-2']])
+		assert.deepEqual(await run('pcoSetDefaultServiceType', { serviceTypeId: 'st-2', clear: true }), [['default', null]])
+	})
+
+	test('unassign waypoint sends a null item id', async () => {
+		assert.deepEqual(await run('waypointUnassign', { waypoint: 'song-1' }), [['assign', 'song-1', null]])
 	})
 })

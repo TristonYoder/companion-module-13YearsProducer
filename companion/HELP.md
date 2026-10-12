@@ -61,11 +61,13 @@ Once connected, this module holds a WebSocket open to the app for as long as the
 - **Plan Set Item Duration Actual** — toggle an item's saved Projected/Actual flag
 - **Plan Reorder Items** — reorder by a comma-separated list of item IDs (must name every current item exactly once)
 - **Plan Import** — parse pasted `Title | Type | Duration` lines into a new plan
+- **Assign Waypoint To Item / Assign Waypoint To Active Item / Unassign Waypoint** — point a waypoint at an item, or take it off whatever carries it (the waypoint stays in the library)
 
 **Planning Center**
 
 - **Planning Center Sign In / Sign Out**
-- **Planning Center Select Service Type / Refresh Service Types**
+- **Planning Center Select Service Type / Refresh Service Types** — tick _Clear selection_ on Select to go back to no service type
+- **Planning Center Set Default Service Type** — remembers a service type for next time; tick _Clear default_ to forget it
 - **Planning Center Refresh Plans / Sync** — sync fetches one specific plan (service type + plan id) and replaces the local plan with it
 - **Planning Center Set Plan Filter** — Upcoming / Past / No Dates / Undated
 - **Planning Center Set Live Sync** — enable/disable PCO Live mirroring

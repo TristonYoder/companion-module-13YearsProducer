@@ -303,11 +303,12 @@ export class ControlApi {
 		return this.send('POST', '/pco/service-types/refresh')
 	}
 
-	/** 202. */
-	async selectPcoServiceType(id: string): Promise<ControlAPIState> {
+	/** 202. A null or empty `id` clears the selection. */
+	async selectPcoServiceType(id: string | null): Promise<ControlAPIState> {
 		return this.send('POST', '/pco/service-type', { id })
 	}
 
+	/** A null `id` clears the remembered default. */
 	async setPcoDefaultServiceType(id: string | null): Promise<PCOStatus> {
 		return this.send('POST', '/pco/default-service-type', { id })
 	}
