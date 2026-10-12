@@ -348,6 +348,16 @@ export class ModuleState {
 		return this.snapshot?.network ?? null
 	}
 
+	get isAtStartOfPlan(): boolean {
+		const plan = this.plan
+		if (!plan) return true
+		if (typeof plan.isAtStartOfPlan === 'boolean') return plan.isAtStartOfPlan
+		for (let i = plan.activeItemIndex - 1; i >= 0; i--) {
+			if (plan.items[i]?.itemType?.toLowerCase() !== 'header') return false
+		}
+		return true
+	}
+
 	roleById(id: string): RoleCue | undefined {
 		return this.roles.find((r) => r.id === id)
 	}

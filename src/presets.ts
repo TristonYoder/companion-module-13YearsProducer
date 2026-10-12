@@ -206,7 +206,7 @@ export function getPresetDefinitions(
 		category: 'Service Navigation',
 		name: 'Previous Item',
 		style: face({ icon: 'planPrevious', label: 'Prev Item', color: BLUE }),
-		feedbacks: [],
+		feedbacks: [{ feedbackId: 'atStartOfPlan', options: {}, style: bg(GREY) }],
 		steps: [{ down: [{ actionId: 'planPrevious', options: {} }], up: [] }],
 	}
 

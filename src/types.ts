@@ -118,6 +118,7 @@ export interface PlanStatus {
 	items: PCOTimerItem[]
 	activeItemIndex: number
 	isAtEndOfPlan: boolean
+	isAtStartOfPlan?: boolean
 	canLoadNextService: boolean
 	pcoServiceTypeId: string | null
 	pcoPlanId: string | null

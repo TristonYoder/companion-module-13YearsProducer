@@ -210,6 +210,19 @@ export function getFeedbackDefinitions(state: ModuleState): CompanionFeedbackDef
 			},
 		},
 
+		atStartOfPlan: {
+			type: 'boolean',
+			name: 'At Start Of Plan',
+			options: [],
+			defaultStyle: {
+				bgcolor: combineRgb(72, 72, 78),
+				color: combineRgb(150, 150, 156),
+			},
+			callback: () => {
+				return state.isAtStartOfPlan
+			},
+		},
+
 		atEndOfPlan: {
 			type: 'boolean',
 			name: 'At End Of Plan',

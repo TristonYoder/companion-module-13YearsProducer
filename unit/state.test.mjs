@@ -218,3 +218,16 @@ test('applyMessage puts a new message at the front of the held thread once, so t
 	state.applyMessage(message)
 	assert.deepEqual(state.snapshot.messages.map((m) => m.id), ['m2', 'm1'])
 })
+
+test('isAtStartOfPlan uses the app value, else skips header items like the app does', () => {
+	const state = new ModuleState()
+	assert.equal(state.isAtStartOfPlan, true)
+	const item = (id, itemType = 'item') => ({ id, title: id, itemType, lengthInSeconds: 60, elapsedSeconds: 0, isRunning: false })
+	const base = snapshot()
+	state.applyState({ ...base, plan: { ...base.plan, items: [item('h', 'header'), item('a'), item('b')], activeItemIndex: 1, isAtStartOfPlan: undefined } })
+	assert.equal(state.isAtStartOfPlan, true)
+	state.applyState({ ...base, plan: { ...base.plan, items: [item('h', 'header'), item('a'), item('b')], activeItemIndex: 2, isAtStartOfPlan: undefined } })
+	assert.equal(state.isAtStartOfPlan, false)
+	state.applyState({ ...base, plan: { ...base.plan, items: [item('a'), item('b')], activeItemIndex: 1, isAtStartOfPlan: true } })
+	assert.equal(state.isAtStartOfPlan, true)
+})

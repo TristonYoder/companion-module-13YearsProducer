@@ -25,6 +25,7 @@ export function getVariableDefinitions(state: ModuleState): CompanionVariableDef
 		{ variableId: 'plan_item_count', name: 'Plan Item Count' },
 		{ variableId: 'plan_item_index', name: 'Plan Item Index (1-based)' },
 		{ variableId: 'plan_is_at_end', name: 'Plan Is At End' },
+		{ variableId: 'plan_is_at_start', name: 'Plan Is At Start' },
 		{ variableId: 'plan_can_load_next_service', name: 'Can Load Next Service' },
 
 		{ variableId: 'active_item_title', name: 'Active Item Title' },
@@ -148,6 +149,7 @@ export function getVariableValues(state: ModuleState): CompanionVariableValues {
 		plan_item_count: state.plan?.items.length ?? 0,
 		plan_item_index: state.plan ? state.plan.activeItemIndex + 1 : 0,
 		plan_is_at_end: state.plan?.isAtEndOfPlan ? 'yes' : 'no',
+		plan_is_at_start: state.isAtStartOfPlan ? 'yes' : 'no',
 		plan_can_load_next_service: state.plan?.canLoadNextService ? 'yes' : 'no',
 
 		active_item_title: state.timer?.item.title ?? '',
