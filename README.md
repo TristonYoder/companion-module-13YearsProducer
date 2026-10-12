@@ -6,9 +6,21 @@ See [companion/HELP.md](companion/HELP.md) for setup and usage.
 
 ## Design
 
-The Control API pushes state over a WebSocket (`hello` on connect, then coalesced `state` events roughly once a second while a timer runs) rather than answering polls. This module holds that socket open for the life of the connection and drives every feedback and variable off what it pushes — it never polls `GET /v1/state` on a timer. Actions still go out over plain REST calls; most mutating routes hand back the full state snapshot anyway, so a REST action rarely needs a follow-up read.
+The Control API pushes state over a WebSocket (`hello` on connect, then coalesced `state` events roughly once a second while a timer runs; on sync protocol v2, only on change, see below) rather than answering polls. This module holds that socket open for the life of the connection and drives every feedback and variable off what it pushes — it never polls `GET /v1/state` on a timer. Actions still go out over plain REST calls; most mutating routes hand back the full state snapshot anyway, so a REST action rarely needs a follow-up read.
 
 There is no authentication: the app's Control API is off by default and has no token of any kind, so this module's config is a host, a port, and one checkbox for whether countdown presets turn red in overtime.
+
+### Sync protocol v2
+
+Newer apps speak the clock-synchronised protocol described in `Server/PROTOCOL-V2.md` of the Producer repo. Right after the socket opens the module sends the `proto` op with `{"version": 2}`; an app that does not answer 200 is treated as legacy and nothing below applies (1 Hz `timer` pushes, 5 s staleness, 12 s keepalive deadline — exactly as before).
+
+On a v2 link:
+
+- **Clock.** The module runs the `sync` op (a burst of 5 samples 100 ms apart on connect, then every 30 s), keeps the last 8 samples and uses the one with the smallest round trip. A change under 20 ms is slewed (25% per sample), anything larger jumps. `ModuleState.producerNowMs()` is the app's clock; `sync_offset_ms` and `sync_rtt_ms` expose the measurement.
+- **Local timer.** The app pushes a `timer` event only when the timer changes, carrying an `anchor`. The module computes elapsed and remaining from the anchor and the offset (`ModuleState.timerRemainingSeconds`, the single accessor every variable, feedback and the Timer Entry preview reads), and ticks on `anchorMs + k * 1000` of the app's clock. Each tick sends only the variables whose value changed and re-checks only the countdown feedbacks.
+- **Digest.** Every 10 s the app sends a `digest` event with FNV-1a 64 hashes of `roles`, `timer`, `plan` and `messages` (`src/sync.ts`, same test vectors as the spec). The module hashes its held snapshot the same way; any difference costs exactly one `GET /v1/state`, adopted through the usual `rev` guard. The digest is also the heartbeat, so staleness is 25 s of silence instead of 5 s.
+
+`src/session.ts` holds the per-connection logic against an injectable clock and scheduler, which is how `unit/session.test.mjs` tests tick alignment and the digest path without a socket. The `sync protocol v2` block in `contract/` runs against a live app and skips itself when the app is older.
 
 ### The Timer Entry keypad
 

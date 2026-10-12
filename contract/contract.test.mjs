@@ -27,6 +27,7 @@ const { host, port } = (() => {
 
 const { ControlApi, ControlSocket, ApiError } = await import('../dist/api.js')
 const { formatDuration, parseTimerInput, resolvedSeconds } = await import('../dist/timerEntry.js')
+const { computeHashes } = await import('../dist/sync.js')
 
 const api = new ControlApi(() => ({ host, port }))
 let originalSelection
@@ -295,4 +296,122 @@ describe('WebSocket', () => {
 		assert.ok('roles' in received)
 		assert.ok('plan' in received)
 	})
+})
+
+// MARK: - Sync protocol v2
+//
+// Needs an app that speaks sync protocol v2 (Server/PROTOCOL-V2.md in the app
+// repo). Against an older app each test skips itself. Nothing here changes
+// app state: `proto` only affects this test's own socket, `sync` and the
+// digest are read-only.
+describe('sync protocol v2', () => {
+	let link
+
+	/** Opens a socket, offers `proto` 2, and collects the events it then receives. */
+	async function openV2() {
+		const digests = []
+		const timers = []
+		const out = { digests, timers, hello: undefined, protoReply: undefined, socket: undefined }
+		await new Promise((resolve, reject) => {
+			const timeout = setTimeout(() => reject(new Error('Timed out negotiating proto')), 5000)
+			out.socket = new ControlSocket(() => ({ host, port }), {
+				onHello: (state) => {
+					out.hello = state
+				},
+				onTimer: (timer) => timers.push(timer),
+				onDigest: (digest) => digests.push(digest),
+				onOpen: () => {
+					out.socket
+						.sendCommand('proto', { version: 2 })
+						.then((reply) => {
+							out.protoReply = reply
+							clearTimeout(timeout)
+							resolve()
+						})
+						.catch(reject)
+				},
+				onError: () => {},
+			})
+			out.socket.connect()
+		})
+		out.supported = out.protoReply.status === 200
+		return out
+	}
+
+	before(async () => {
+		link = await openV2()
+	})
+
+	after(() => {
+		link?.socket.close()
+	})
+
+	test('proto is acknowledged with version 2', async (t) => {
+		if (!link.supported) return t.skip('app does not speak sync protocol v2')
+		assert.equal(link.protoReply.status, 200)
+		assert.equal(link.protoReply.data.version, 2)
+	})
+
+	test('the sync op echoes t0 and answers t1 <= t2, over the socket and REST', async (t) => {
+		if (!link.supported) return t.skip('app does not speak sync protocol v2')
+		const t0 = Date.now()
+		const reply = await link.socket.sendCommand('sync', { t0 })
+		assert.equal(reply.status, 200)
+		assert.equal(reply.data.t0, t0)
+		assert.equal(typeof reply.data.t1, 'number')
+		assert.equal(typeof reply.data.t2, 'number')
+		assert.ok(reply.data.t1 <= reply.data.t2)
+
+		const rest = await api.sync(t0)
+		assert.equal(rest.t0, t0)
+		assert.ok(rest.t1 <= rest.t2)
+		assert.ok(Math.abs(rest.t1 - Date.now()) < 5000, 'app clock within seconds of this machine on a LAN test rig')
+	})
+
+	test('an active timer carries its anchor', async (t) => {
+		if (!link.supported) return t.skip('app does not speak sync protocol v2')
+		const state = await api.getState()
+		if (!state.timer) return t.skip('no active timer in the plan under test')
+		const { anchor } = state.timer
+		assert.ok(anchor, 'timer.anchor present on v2')
+		assert.equal(anchor.itemId, state.timer.item.id)
+		assert.equal(typeof anchor.elapsedMs, 'number')
+		assert.equal(typeof anchor.anchorMs, 'number')
+		assert.equal(typeof anchor.isRunning, 'boolean')
+		assert.equal(typeof anchor.lengthInSeconds, 'number')
+		assert.equal(typeof anchor.isDurationActual, 'boolean')
+	})
+
+	test(
+		'a digest arrives within ~12 s and equals the module-computed hashes of GET /v1/state',
+		{ timeout: 40000 },
+		async (t) => {
+			if (!link.supported) return t.skip('app does not speak sync protocol v2')
+
+			const nextDigest = async (after) => {
+				const deadline = Date.now() + 13000
+				while (link.digests.length <= after) {
+					if (Date.now() > deadline) throw new Error('No digest within 13 s')
+					await new Promise((resolve) => setTimeout(resolve, 100))
+				}
+				return link.digests[after]
+			}
+
+			// Another client changing state between digest and fetch would make the comparison meaningless, so only compare when the revs agree.
+			let compared = false
+			for (let i = 0; i < 3 && !compared; i++) {
+				const digest = await nextDigest(i)
+				for (const section of ['roles', 'timer', 'plan', 'messages']) {
+					assert.match(digest.hashes[section], /^[0-9a-f]{16}$/, `${section} is 16 lowercase hex digits`)
+				}
+				assert.equal(typeof digest.rev, 'number')
+				assert.equal(typeof digest.serverNowMs, 'number')
+				const state = await api.getState()
+				if (state.rev !== digest.rev) continue
+				assert.deepEqual(computeHashes(state), digest.hashes)
+				compared = true
+			}
+			if (!compared) t.diagnostic('state kept changing; hash equality not compared this run')
+		},
+	)
 })

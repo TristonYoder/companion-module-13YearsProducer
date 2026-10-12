@@ -8,7 +8,7 @@ Connects Bitfocus Companion to [13 Years Producer](https://13years.app) — a li
 2. In Companion, add this module and fill in **Producer Host / IP** and **Port**, then save. **Turn countdown buttons red in overtime** (on by default) decides whether the countdown presets go red once an item runs over; presets are rebuilt as soon as you save.
 3. That's it — no API key, no login. The Control API has no authentication at all, so only point this at a device on a trusted production network.
 
-Once connected, this module holds a WebSocket open to the app for as long as the connection lives (`ws://host:port/v1/socket`). The app pushes a full state snapshot the instant that socket opens, then again roughly once a second while a timer is counting down, and again whenever anything else changes (a cue fires, a message arrives, the plan advances). Every action, feedback, and variable here reacts to those pushes — this module never polls the app on a timer. If the socket drops (the Mac sleeps, the iPad gets backgrounded — the Control API doesn't run while the app isn't in the foreground on iPad), it reconnects on its own and the **Connection Lost** feedback lights up in the meantime. A keepalive ping runs every 5 seconds; a socket that has gone silent for about 12 seconds (a half-open connection after a sleep, say) is dropped and redialled, and **Connection Stale** lights up if nothing at all has arrived for more than 5 seconds while the socket still looks open. REST commands time out after 3 seconds, and each command's reply is applied at once instead of waiting for the next push.
+Once connected, this module holds a WebSocket open to the app for as long as the connection lives (`ws://host:port/v1/socket`). The app pushes a full state snapshot the instant that socket opens, then again roughly once a second while a timer is counting down, and again whenever anything else changes (a cue fires, a message arrives, the plan advances). Every action, feedback, and variable here reacts to those pushes — this module never polls the app on a timer. If the socket drops (the Mac sleeps, the iPad gets backgrounded — the Control API doesn't run while the app isn't in the foreground on iPad), it reconnects on its own and the **Connection Lost** feedback lights up in the meantime. A keepalive ping runs every 5 seconds; a socket that has gone silent for about 12 seconds (a half-open connection after a sleep, say) is dropped and redialled, and **Connection Stale** lights up if nothing at all has arrived for more than 5 seconds while the socket still looks open. Newer apps also speak a clock-synchronised protocol (v2) that this module negotiates automatically: the app then pushes the timer only when it changes, this module counts the clock down itself against a measured offset to the app's clock, and a small hash check every 10 seconds catches anything missed (one fresh read of the state if it ever disagrees). On such a link the keepalive and **Connection Stale** allowances widen to 25 seconds of silence, since the app is quiet by design between digests. Older apps keep working exactly as described above. REST commands time out after 3 seconds, and each command's reply is applied at once instead of waiting for the next push.
 
 **The role-selection trap:** the app's _currently selected roles_ aren't remembered across launches — a fresh launch starts with nothing selected, or with a selection that no longer matches any real role. Firing **Fire Selected Cue** into that state 409s rather than silently doing nothing, and this module logs a clear warning when it happens. Run **Set Selection** first (or use the per-role **Fire Role Cue** action instead, which doesn't depend on selection at all).
 
@@ -107,7 +107,7 @@ Once connected, this module holds a WebSocket open to the app for as long as the
 - **Timer Entry Sign Is** — true while the buffer carries a specific sign, so the active `+`/`−` key reads as engaged
 - **Timer Entry In Progress** — true whenever anything is typed, for the C and Backspace keys
 - **Connection Lost** — true whenever the control socket isn't currently open
-- **Connection Stale** — true while the socket looks open but nothing has arrived for more than 5 seconds
+- **Connection Stale** — true while the socket looks open but nothing has arrived for more than 5 seconds (25 seconds on sync protocol v2)
 - **Rundown Row Is The Live Item** — true when row 1-8 of the current rundown page is the live item
 - **At End Of Plan** — true once the plan has advanced past its last item
 - **Planning Center Connected**
@@ -115,16 +115,17 @@ Once connected, this module holds a WebSocket open to the app for as long as the
 ## Variables
 
 - `connection_status`, `connected_api_clients` — this module's link to the app
+- `sync_offset_ms` — the app's clock minus this machine's, in ms; `sync_rtt_ms` — round trip of the best clock sample. Both blank on an app without sync protocol v2
 - `app_mode`
 - `plan_title`, `plan_item_count`, `plan_item_index`, `plan_is_at_end`
 - `active_item_title`, `active_item_type`, `active_item_service_plan_title`
-- `active_item_remaining` (the app's own formatted string, e.g. `1:35:00`), `active_item_remaining_seconds`, `active_item_is_overtime`, `active_item_is_running`
+- `active_item_remaining` (formatted like the app's own screen, e.g. `1:35:00`; counted locally from the timer anchor on sync protocol v2, otherwise the pushed string), `active_item_remaining_seconds`, `active_item_is_overtime`, `active_item_is_running`
 - `timer_entry_buffer` — what the Timer Entry keypad has typed so far; `timer_entry_preview` — what the active item would read as if it were committed, in the app's own format. A relative entry previews the amount first and where it lands second (`+00:30` over `= 04:30`), since `04:30` on its own looks the same whether it came from `430` or from `+30s`. Both are blank when nothing is typed, the way the app's popover leaves its preview line blank rather than showing an error
 - `next_item_title`, `next_item_type`, `next_item_length`
 - `active_item_progress_pct` — elapsed over length, whole percent 0-100
 - `projected_end_time` — local `HH:MM` the plan finishes if it runs as planned from here; `service_remaining_total` — live item remaining plus everything after it; `service_over_under` — projected end against the next schedule's start plus the planned total (`+` is over), blank when no schedule exists
 - `rundown_row_1_title` … `rundown_row_8_title`, `rundown_row_1_length` … `rundown_row_8_length`, `rundown_page`, `rundown_page_count` — the Rundown presets' rows
-- `connection_stale` — `yes` when the link is quiet
+- `connection_stale` — `yes` when the link is quiet (more than 5 s, or 25 s on sync protocol v2)
 - `selected_role_names` — comma-joined
 - `last_message_text`, `last_message_sender`, `last_message_is_high_priority`
 - `pco_connected`, `pco_user_name`, `pco_live_sync_enabled`
