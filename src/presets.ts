@@ -238,13 +238,13 @@ export function getPresetDefinitions(
 		steps: [{ down: [], up: [] }],
 	}
 
-	presets['plan_next_start'] = {
+	presets['plan_next_hold'] = {
 		type: 'button',
 		category: 'Service Navigation',
-		name: 'Next Item + Start Timer',
-		style: face({ icon: 'planNext', label: 'Next + Start', color: GREEN }),
+		name: 'Next Item (Hold Clock)',
+		style: face({ icon: 'planNext', label: 'Next (Hold)', color: AMBER }),
 		feedbacks: [{ feedbackId: 'atEndOfPlan', options: {}, style: bg(GREY) }],
-		steps: [{ down: [{ actionId: 'planNext', options: { startTimer: true } }], up: [] }],
+		steps: [{ down: [{ actionId: 'planNext', options: { startTimer: false } }], up: [] }],
 	}
 
 	presets['countdown_stages'] = {

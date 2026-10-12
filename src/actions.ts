@@ -80,7 +80,7 @@ const START_TIMER_OPTION = {
 	type: 'checkbox',
 	id: 'startTimer',
 	label: 'Start the timer on arrival',
-	default: false,
+	default: true,
 } as const
 
 const TIMER_ENTRY_APPEND_KEYS = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'h', 'm', 's', ':']
@@ -387,7 +387,7 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 			name: 'Plan Next',
 			options: [START_TIMER_OPTION],
 			callback: guarded(async (action) => {
-				await deps.api.planNext(action.options.startTimer ? true : undefined)
+				await deps.api.planNext(Boolean(action.options.startTimer))
 			}, deps),
 		},
 
@@ -395,7 +395,7 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 			name: 'Plan Previous',
 			options: [START_TIMER_OPTION],
 			callback: guarded(async (action) => {
-				await deps.api.planPrevious(action.options.startTimer ? true : undefined)
+				await deps.api.planPrevious(Boolean(action.options.startTimer))
 			}, deps),
 		},
 
@@ -406,7 +406,7 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 			options: [START_TIMER_OPTION],
 			callback: guarded(
 				async (action) => {
-					await deps.api.waypointNext(action.options.startTimer ? true : undefined)
+					await deps.api.waypointNext(Boolean(action.options.startTimer))
 				},
 				deps,
 				(err) => (err.status === 409 ? 'There is no waypoint ahead of the live item.' : undefined),
