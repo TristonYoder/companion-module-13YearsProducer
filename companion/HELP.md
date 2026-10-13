@@ -88,7 +88,7 @@ Once connected, this module holds a WebSocket open to the app for as long as the
 
 **App Navigation**
 
-- **Set UI Mode** — switch the app's own screen (Producer Control / Service Flow / Live Preview / Messages / Settings)
+- **Set UI Mode** — switch the app's own screen (Pagers / Run Sheet / Live Preview / Messages / Settings)
 
 **Plotiphar** (lighting/scenic companion app pairing)
 

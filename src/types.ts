@@ -35,8 +35,8 @@ export function nextCueStateInCycle(current: CueStateValue): CueStateValue {
 export type AppModeValue = 'PRODUCER_CONTROL' | 'SERVICE_FLOW' | 'LIVE_PREVIEW' | 'MESSAGES' | 'SETTINGS'
 
 export const APP_MODES: { id: AppModeValue; label: string }[] = [
-	{ id: 'PRODUCER_CONTROL', label: 'Producer Control' },
-	{ id: 'SERVICE_FLOW', label: 'Service Flow' },
+	{ id: 'PRODUCER_CONTROL', label: 'Pagers' },
+	{ id: 'SERVICE_FLOW', label: 'Run Sheet' },
 	{ id: 'LIVE_PREVIEW', label: 'Live Preview' },
 	{ id: 'MESSAGES', label: 'Messages' },
 	{ id: 'SETTINGS', label: 'Settings' },
