@@ -23,9 +23,9 @@ const DEFAULT_HOUR_FORMAT_THRESHOLD = 'over90Minutes'
 
 export const RUNDOWN_ROWS = 8
 
-export const STALE_AFTER_MS = 7500
+export const STALE_AFTER_MS = 8000
 
-export const STALE_AFTER_MS_V2 = 15000
+export const STALE_AFTER_MS_V2 = 5000
 
 export const ACTION_ERROR_HOLD_MS = 10000
 
@@ -326,6 +326,26 @@ export class ModuleState {
 		if (this.protoVersion !== 2) return 'legacy'
 		const rtt = this.sync.rttMs
 		return rtt === null ? 'v2' : `v2 ±${Math.round(rtt / 2)} ms`
+	}
+
+	get producerUtcOffsetSeconds(): number | null {
+		const offset = this.snapshot?.utcOffsetSeconds
+		return typeof offset === 'number' && Number.isFinite(offset) ? offset : null
+	}
+
+	get producerTimeText(): string {
+		const offset = this.producerUtcOffsetSeconds
+		if (offset === null || !this.sync.hasOffset) return ''
+		return new Date(this.sync.producerNowMs() + offset * 1000).toISOString().slice(11, 19)
+	}
+
+	get producerUtcOffsetText(): string {
+		const offset = this.producerUtcOffsetSeconds
+		if (offset === null) return ''
+		const abs = Math.abs(offset)
+		const hh = String(Math.floor(abs / 3600)).padStart(2, '0')
+		const mm = String(Math.floor((abs % 3600) / 60)).padStart(2, '0')
+		return `UTC${offset < 0 ? '-' : '+'}${hh}:${mm}`
 	}
 
 	get plan(): PlanStatus | null {

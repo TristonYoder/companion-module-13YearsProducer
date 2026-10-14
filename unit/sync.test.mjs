@@ -338,21 +338,21 @@ describe('v2 vs legacy accessors', () => {
 		assert.equal(state.timerEntryPreview, '+00:30\n= 08:50')
 	})
 
-	test('stale threshold is 7.5 s legacy, 15 s on v2', () => {
+	test('stale threshold is 8 s legacy, 5 s on v2', () => {
 		let now = 0
 		const state = new ModuleState(() => now)
 		state.setSocketConnected(true)
 		assert.equal(state.staleAfterMs, STALE_AFTER_MS)
-		now = 7500
+		now = 8000
 		assert.equal(state.isStale, false)
-		now = 7501
+		now = 8001
 		assert.equal(state.isStale, true)
 		state.setProtoVersion(2)
 		assert.equal(state.staleAfterMs, STALE_AFTER_MS_V2)
+		state.markFrame()
+		now = 13000
 		assert.equal(state.isStale, false)
-		now = 15000
-		assert.equal(state.isStale, false)
-		now = 15001
+		now = 13002
 		assert.equal(state.isStale, true)
 		state.markFrame()
 		assert.equal(state.isStale, false)

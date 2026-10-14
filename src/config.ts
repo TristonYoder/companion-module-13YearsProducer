@@ -23,7 +23,7 @@ export function getConfigFields(): SomeCompanionConfigField[] {
 			id: 'host',
 			label: 'Producer Host / IP',
 			tooltip:
-				"The Mac or iPad's LAN address, shown in the app under Settings → Control API. The app also advertises the API over Bonjour (service _13years._tcp, TXT keys ip and apiport), but this module always dials host:port directly. Use just the address: no http://, path or port.",
+				"The Mac or iPad's LAN address (shown in the app under Settings → Control API), or the hostname or IP of a headless Producer server, which can be on any network (for example over a VPN or Tailscale). The app also advertises the API over Bonjour (service _13years._tcp, TXT keys ip and apiport), but this module always dials host:port directly. Use just the address: no http://, path or port.",
 			width: 8,
 			default: '',
 		},

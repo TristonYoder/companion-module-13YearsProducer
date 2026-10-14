@@ -129,7 +129,7 @@ describe('proto negotiation', () => {
 			['proto'],
 		)
 		assert.equal(h.state.protoVersion, 1)
-		assert.equal(h.state.staleAfterMs, 7500)
+		assert.equal(h.state.staleAfterMs, 8000)
 		assert.equal(h.state.timerRemainingSeconds, 7)
 		assert.equal(h.state.sync.hasOffset, false)
 		assert.equal(h.log.changes, 0)

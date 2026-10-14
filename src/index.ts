@@ -33,6 +33,7 @@ class ThirteenYearsProducerInstance extends InstanceBase<ModuleConfig> {
 	private definitionSignature = ''
 	private staleTimer: ReturnType<typeof setInterval> | undefined
 	private wasStale = false
+	private lastProducerTime = ''
 	private lastActionError = ''
 
 	async init(config: ModuleConfig, _isFirstInit: boolean): Promise<void> {
@@ -144,6 +145,11 @@ class ThirteenYearsProducerInstance extends InstanceBase<ModuleConfig> {
 		this.session.checkWake(Date.now())
 		const stale = this.state.isStale
 		const actionError = this.state.currentActionError
+		const producerTime = this.state.producerTimeText
+		if (producerTime !== this.lastProducerTime) {
+			this.lastProducerTime = producerTime
+			this.pushVariables()
+		}
 		if (stale === this.wasStale && actionError === this.lastActionError) return
 		this.wasStale = stale
 		this.lastActionError = actionError

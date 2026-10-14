@@ -231,14 +231,14 @@ describe('rundown paging', () => {
 })
 
 describe('staleness', () => {
-	test('stale only when connected and quiet for more than 7.5s', () => {
+	test('stale only when connected and quiet for more than 8s', () => {
 		let now = 0
 		const state = new ModuleState(() => now)
 		assert.equal(state.isStale, false)
 		state.setSocketConnected(true)
-		now = 7500
+		now = 8000
 		assert.equal(state.isStale, false)
-		now = 7501
+		now = 8001
 		assert.equal(state.isStale, true)
 		state.markFrame()
 		assert.equal(state.isStale, false)

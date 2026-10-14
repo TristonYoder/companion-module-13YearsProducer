@@ -18,6 +18,9 @@ export function getVariableDefinitions(state: ModuleState): CompanionVariableDef
 		{ variableId: 'relay_enabled', name: 'Cloud Relay Enabled' },
 		{ variableId: 'relay_host', name: 'Cloud Relay Host' },
 
+		{ variableId: 'producer_time', name: "Producer's Local Time (HH:MM:SS, from the synced clock)" },
+		{ variableId: 'producer_utc_offset', name: "Producer's UTC Offset (e.g. UTC-04:00)" },
+		{ variableId: 'producer_utc_offset_seconds', name: "Producer's UTC Offset (seconds)" },
 		{ variableId: 'app_mode', name: 'App Mode' },
 		{ variableId: 'settings_hour_format_threshold', name: 'HH:MM:SS Formatting Threshold' },
 
@@ -144,6 +147,9 @@ export function getVariableValues(state: ModuleState): CompanionVariableValues {
 		relay_enabled: state.network?.relayEnabled ? 'yes' : 'no',
 		relay_host: state.network?.relayHost ?? '',
 
+		producer_time: state.producerTimeText,
+		producer_utc_offset: state.producerUtcOffsetText,
+		producer_utc_offset_seconds: state.producerUtcOffsetSeconds ?? '',
 		app_mode: state.snapshot?.appMode ?? '',
 		settings_hour_format_threshold: state.settings?.hourFormatThreshold ?? '',
 

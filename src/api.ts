@@ -457,7 +457,7 @@ export const HANDSHAKE_TIMEOUT_MS = 5000
 export const SOCKET_COMMAND_TIMEOUT_MS = 5000
 const PING_INTERVAL_MS = 5000
 const PONG_DEADLINE_MS = 12000
-const PONG_DEADLINE_MS_V2 = 25000
+const PONG_DEADLINE_MS_V2 = 20000
 
 export class ControlSocket {
 	private ws: WebSocket | undefined
