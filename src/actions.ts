@@ -1012,7 +1012,7 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 		},
 
 		networkSetMaster: {
-			name: 'Network Set Master',
+			name: 'Network Set Master (deprecated)',
 			options: [
 				{
 					type: 'checkbox',

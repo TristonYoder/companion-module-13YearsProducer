@@ -215,6 +215,7 @@ export const SCHEDULE_RECURRENCES: { id: string; label: string }[] = [
 
 export interface ControlAPIState {
 	appMode: string
+	utcOffsetSeconds?: number
 	network: NetworkStatus
 	roles: RoleCue[]
 	selectedRoleIds: string[]
