@@ -26,11 +26,14 @@ import type {
 	SyncReplyData,
 	TimerRemainingBody,
 	TimerSnapshot,
+	EventTimeLiveBody,
+	EventTimesStatus,
 	PlanItemWaypointsBody,
 	ScheduleCreateBody,
 	ScheduleEntry,
 	ScheduleStatus,
 	ScheduleUpdateBody,
+	TimerEndAtBody,
 	WaypointAssignBody,
 	WaypointCreateBody,
 	WaypointFireBody,
@@ -429,6 +432,18 @@ export class ControlApi {
 
 	async deleteSchedule(id: string): Promise<ScheduleStatus> {
 		return this.send('DELETE', `/schedules/${encodeURIComponent(id)}`)
+	}
+
+	async setLiveEventTime(id: string): Promise<EventTimesStatus> {
+		return this.send('POST', '/event-times/live', { id } satisfies EventTimeLiveBody)
+	}
+
+	async nextEventTime(): Promise<ControlAPIState> {
+		return this.send('POST', '/event-times/next')
+	}
+
+	async timerEndAt(time: string): Promise<ControlAPIState> {
+		return this.send('POST', '/timer/end-at', { time } satisfies TimerEndAtBody)
 	}
 
 	async scheduleGoLive(id: string): Promise<ControlAPIState> {

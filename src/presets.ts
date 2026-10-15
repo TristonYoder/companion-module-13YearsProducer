@@ -582,6 +582,24 @@ export function getPresetDefinitions(
 		steps: [{ down: [], up: [] }],
 	}
 
+	presets['event_time_next'] = {
+		type: 'button',
+		category: 'Event Times',
+		name: 'Next Service (next event time)',
+		style: face({ icon: 'planNextService', label: 'Next Service', color: GREY }),
+		feedbacks: [{ feedbackId: 'hasNextEventTime', options: {}, style: bg(BLUE) }],
+		steps: [{ down: [{ actionId: 'eventTimeNext', options: {} }], up: [] }],
+	}
+
+	presets['event_time_status'] = {
+		type: 'button',
+		category: 'Event Times',
+		name: 'Live Event Time (status)',
+		style: face({ icon: 'schedule', label: '$(13yearsproducer:event_time_live)', color: DARK, size: 'auto' }),
+		feedbacks: [],
+		steps: [{ down: [], up: [] }],
+	}
+
 	presets['duration_toggle_live'] = {
 		type: 'button',
 		category: 'Projected / Actual',

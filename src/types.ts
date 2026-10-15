@@ -213,6 +213,29 @@ export const SCHEDULE_RECURRENCES: { id: string; label: string }[] = [
 	{ id: 'weekly', label: 'Weekly' },
 ]
 
+export interface EventTimeEntry {
+	id: string
+	name?: string | null
+	day?: string | null
+	startTime?: string | null
+	displayName: string
+	pcoPlanTimeId?: string | null
+}
+
+export interface EventTimesStatus {
+	entries: EventTimeEntry[]
+	liveId?: string | null
+	nextId?: string | null
+}
+
+export interface EventTimeLiveBody {
+	id: string
+}
+
+export interface TimerEndAtBody {
+	time: string
+}
+
 export interface ControlAPIState {
 	appMode: string
 	utcOffsetSeconds?: number
@@ -228,6 +251,7 @@ export interface ControlAPIState {
 	settings: SettingsStatus
 	waypoints: WaypointStatus[]
 	schedules: ScheduleStatus
+	eventTimes?: EventTimesStatus
 	rev?: number
 	serverNowMs?: number
 	epoch?: number

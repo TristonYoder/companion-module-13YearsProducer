@@ -14,7 +14,7 @@ import {
 	type PlanItemUpdateBody,
 	type RoleUpdateBody,
 } from './types.js'
-import { lengthFromOption } from './timerEntry.js'
+import { lengthFromOption, normalizeClockTime } from './timerEntry.js'
 import type { TimerEntrySign } from './timerEntry.js'
 
 export interface ActionDeps {
@@ -99,6 +99,7 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 	const planItemChoices = deps.state.planItemChoices()
 	const waypointChoices = deps.state.waypointChoices()
 	const scheduleChoices = deps.state.scheduleChoices()
+	const eventTimeChoices = deps.state.eventTimeChoices()
 	const serviceTypeChoices = (deps.state.pco?.serviceTypes ?? []).map((t) => ({ id: t.id, label: t.name }))
 	const planChoices = (deps.state.pco?.plans ?? []).map((p) => ({ id: p.id, label: p.title }))
 	const noteCategoryChoices = (deps.state.pco?.noteCategories ?? []).map((c) => ({ id: c.id, label: c.name }))
@@ -354,6 +355,34 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 				deps.state.clearTimerEntry()
 				deps.refresh()
 			}, deps),
+		},
+
+		timerEndAt: {
+			name: 'Timer: End At',
+			description:
+				'Makes the active timer end at a clock time on the producer\u2019s clock. 24-hour (14:30) or 12-hour (2:30 PM); sent to the app as HH:mm.',
+			options: [
+				{
+					type: 'textinput',
+					id: 'time',
+					label: 'Time (HH:mm or h:mm AM/PM)',
+					default: '',
+					useVariables: true,
+				},
+			],
+			callback: guarded(
+				async (action, context) => {
+					const raw = await context.parseVariablesInString(optString(action.options.time))
+					const time = normalizeClockTime(raw)
+					if (!time) {
+						deps.log('warn', `Timer: End At needs a time like 14:30 or 2:30 PM, not "${raw.trim()}".`)
+						return
+					}
+					await deps.api.timerEndAt(time)
+				},
+				deps,
+				(err) => (err.status === 409 ? 'There is no active item to set an end time on.' : undefined),
+			),
 		},
 
 		timerActualOverride: {
@@ -1367,6 +1396,47 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 					isEnabled: action.options.isEnabled !== false,
 				})
 			}, deps),
+		},
+
+		eventTimeSetLive: {
+			name: 'Set Live Event Time',
+			description: 'Makes this event time (service time) the live one. The active item stays where it is.',
+			options: [
+				{
+					type: 'dropdown',
+					id: 'eventTimeId',
+					label: 'Event time',
+					choices: eventTimeChoices,
+					default: eventTimeChoices[0]?.id ?? '',
+					allowCustom: true,
+				},
+			],
+			callback: guarded(
+				async (action) => {
+					const id = optString(action.options.eventTimeId).trim()
+					if (!id) {
+						deps.log('warn', 'Set Live Event Time needs an event time.')
+						return
+					}
+					await deps.api.setLiveEventTime(id)
+				},
+				deps,
+				(err) => (err.status === 404 ? 'That event time does not exist. Pick one from the list.' : undefined),
+			),
+		},
+
+		eventTimeNext: {
+			name: 'Next Event Time',
+			description:
+				'At the end of the run sheet, makes the next event time live and returns to the first item, paused. Warns when there is no next one.',
+			options: [],
+			callback: guarded(
+				async () => {
+					await deps.api.nextEventTime()
+				},
+				deps,
+				(err) => (err.status === 409 ? 'There is no next event time.' : undefined),
+			),
 		},
 
 		scheduleGoLive: {
