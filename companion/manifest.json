@@ -14,7 +14,7 @@
 		"planning center"
 	],
 	"description": "Drive standby/GO cues to pagers and control the countdown timer and service plan of the 13 Years Producer app via its local Control API — over a WebSocket-pushed connection, never polled.",
-	"version": "1.5.0",
+	"version": "1.6.0",
 	"license": "MIT",
 	"repository": "git@github.com:TristonYoder/companion-module-13YearsProducer.git",
 	"bugs": "https://github.com/TristonYoder/companion-module-13YearsProducer/issues",
