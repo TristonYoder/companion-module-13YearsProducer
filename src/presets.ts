@@ -585,8 +585,8 @@ export function getPresetDefinitions(
 	presets['event_time_next'] = {
 		type: 'button',
 		category: 'Event Times',
-		name: 'Next Service (next event time)',
-		style: face({ icon: 'planNextService', label: 'Next Service', color: GREY }),
+		name: 'Next Event Time',
+		style: face({ icon: 'planNextService', label: 'Next Event', color: GREY }),
 		feedbacks: [{ feedbackId: 'hasNextEventTime', options: {}, style: bg(BLUE) }],
 		steps: [{ down: [{ actionId: 'eventTimeNext', options: {} }], up: [] }],
 	}

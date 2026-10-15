@@ -89,7 +89,7 @@ Once connected, this module holds a WebSocket open to the app for as long as the
 
 **Event Times** (needs a Producer that reports `eventTimes`; older ones show an empty list)
 
-- **Set Live Event Time** — pick which event time (service time) is live; the dropdown follows the Producer, and custom text takes an id directly. The active item stays put
+- **Set Live Event Time** — pick which event time is live; the dropdown follows the Producer, and custom text takes an id directly. The active item stays put
 - **Next Event Time** — at the end of the run sheet, make the next event time live and return to the first item, paused (warns when there is no next one)
 
 **App Navigation**

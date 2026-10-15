@@ -1400,7 +1400,7 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 
 		eventTimeSetLive: {
 			name: 'Set Live Event Time',
-			description: 'Makes this event time (service time) the live one. The active item stays where it is.',
+			description: 'Makes this event time the live one. The active item stays where it is.',
 			options: [
 				{
 					type: 'dropdown',
