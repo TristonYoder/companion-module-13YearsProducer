@@ -86,6 +86,9 @@ export function getVariableDefinitions(state: ModuleState): CompanionVariableDef
 		{ variableId: 'next_schedule_starts_at', name: 'Next Schedule Starts At' },
 		{ variableId: 'next_schedule_go_live_at', name: 'Next Schedule Goes Live At' },
 		{ variableId: 'next_schedule_recurrence', name: 'Next Schedule Recurrence' },
+		{ variableId: 'event_time_live', name: 'Live Event Time' },
+		{ variableId: 'event_time_next', name: 'Next Event Time' },
+		{ variableId: 'event_time_count', name: 'Event Time Count' },
 	]
 
 	for (let row = 1; row <= RUNDOWN_ROWS; row++) {
@@ -220,6 +223,9 @@ export function getVariableValues(state: ModuleState): CompanionVariableValues {
 		next_schedule_starts_at: nextSchedule?.startsAt ?? '',
 		next_schedule_go_live_at: nextSchedule?.goLiveAt ?? '',
 		next_schedule_recurrence: nextSchedule?.recurrence ?? '',
+		event_time_live: state.liveEventTime?.displayName ?? '',
+		event_time_next: state.nextEventTime?.displayName ?? '',
+		event_time_count: state.eventTimeEntries.length,
 	}
 
 	for (let row = 1; row <= RUNDOWN_ROWS; row++) {

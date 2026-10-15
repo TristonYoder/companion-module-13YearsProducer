@@ -13,6 +13,8 @@ import type {
 	RoleCue,
 	ScheduleEntry,
 	ScheduleStatus,
+	EventTimeEntry,
+	EventTimesStatus,
 	SettingsStatus,
 	TimerAnchor,
 	TimerSnapshot,
@@ -443,6 +445,31 @@ export class ModuleState {
 		return this.scheduleEntries.map((e) => ({ id: e.id, label: e.title }))
 	}
 
+	get eventTimes(): EventTimesStatus | null {
+		return this.snapshot?.eventTimes ?? null
+	}
+
+	get eventTimeEntries(): EventTimeEntry[] {
+		const entries = this.eventTimes?.entries
+		return Array.isArray(entries) ? entries : []
+	}
+
+	get liveEventTime(): EventTimeEntry | undefined {
+		const liveId = this.eventTimes?.liveId
+		if (!liveId) return undefined
+		return this.eventTimeEntries.find((e) => e.id === liveId)
+	}
+
+	get nextEventTime(): EventTimeEntry | undefined {
+		const nextId = this.eventTimes?.nextId
+		if (!nextId) return undefined
+		return this.eventTimeEntries.find((e) => e.id === nextId)
+	}
+
+	eventTimeChoices(): { id: string; label: string }[] {
+		return this.eventTimeEntries.map((e) => ({ id: e.id, label: e.displayName || e.id }))
+	}
+
 	get hasStandingNotification(): boolean {
 		const newest = this.snapshot?.messages[0]
 		if (!newest) return false
@@ -576,6 +603,7 @@ export class ModuleState {
 			(this.plan?.items ?? []).map((i) => [i.id, i.title, i.lengthInSeconds]),
 			this.waypoints.map((w) => [w.id, w.slug, w.name]),
 			this.scheduleEntries.map((e) => [e.id, e.title]),
+			this.eventTimeEntries.map((e) => [e.id, e.displayName]),
 			[
 				this.pco?.selectedServiceTypeId ?? null,
 				this.pco?.defaultServiceTypeId ?? null,

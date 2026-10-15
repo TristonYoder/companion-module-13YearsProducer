@@ -195,3 +195,20 @@ export function lengthFromOption(
 	if (seconds > MAX_LENGTH_SECONDS) throw new Error(`"${text}" is longer than 24 hours.`)
 	return seconds
 }
+
+export function normalizeClockTime(raw: string | number | boolean | null | undefined): string | null {
+	const text = raw === undefined || raw === null ? '' : String(raw).trim().toLowerCase()
+	const match = /^(\d{1,2})(?::(\d{2}))?\s*(am|pm|a|p)?$/.exec(text)
+	if (!match) return null
+	let hours = Number(match[1])
+	const minutes = match[2] === undefined ? 0 : Number(match[2])
+	const meridiem = match[3]
+	if (minutes > 59) return null
+	if (meridiem) {
+		if (hours < 1 || hours > 12) return null
+		hours = (hours % 12) + (meridiem.startsWith('p') ? 12 : 0)
+	} else if (match[2] === undefined || hours > 23) {
+		return null
+	}
+	return `${pad2(hours)}:${pad2(minutes)}`
+}

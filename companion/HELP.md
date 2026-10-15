@@ -38,6 +38,7 @@ Once connected, this module holds a WebSocket open to the app for as long as the
 - **Timer Adjust** — add or subtract N seconds from the active item's remaining time
 - **Timer Set Remaining (Seconds)** — set the remaining time to an absolute value
 - **Timer Set Remaining (Input)** — set or adjust remaining time using the app's own typed-in grammar: `"4350"` (absolute seconds), `"+30s"`, `"-5m"`, `"1h30m"` — the same parser the app's own time field uses
+- **Timer: End At** — end the active item at a clock time on the producer's clock. Type `14:30` or `2:30 PM`; the module sends `HH:mm` and warns (without calling the app) on anything else. Variables work in the field
 - **Timer Actual Override** — flip the active item's Projected/Actual display flag (a transient override; doesn't touch the plan item's own saved flag)
 
 **Timer Entry** (the keypad — see the **Timer Entry** presets below)
@@ -86,6 +87,11 @@ Once connected, this module holds a WebSocket open to the app for as long as the
 - **Create Schedule** — title, start time (ISO-8601 such as `2026-10-18T10:00:00-04:00`; without an offset it is read as this machine's local time), lead time in minutes, once/weekly, enabled
 - **Bring Schedule Live Now / Bring Next Schedule Live Now / Enable/Disable Schedule / Set Schedule Lead Time / Delete Schedule**
 
+**Event Times** (needs a Producer that reports `eventTimes`; older ones show an empty list)
+
+- **Set Live Event Time** — pick which event time is live; the dropdown follows the Producer, and custom text takes an id directly. The active item stays put
+- **Next Event Time** — at the end of the run sheet, make the next event time live and return to the first item, paused (warns when there is no next one)
+
 **App Navigation**
 
 - **Set UI Mode** — switch the app's own screen (Pagers / Run Sheet / Live Preview / Messages / Settings)
@@ -117,6 +123,7 @@ Once connected, this module holds a WebSocket open to the app for as long as the
 - **Last Action Failed** — true for 10 seconds after an action failed; the reason is in `last_action_error`
 - **Rundown Row Is The Live Item** — true when row 1-8 of the current rundown page is the live item
 - **At End Of Plan** — true once the plan has advanced past its last item
+- **Next Event Time Available** — true when the live event time is not the last one (the Producer reported a `nextId`); false on an older Producer without event times
 - **Planning Center Connected**
 
 ## Variables
@@ -125,6 +132,7 @@ Once connected, this module holds a WebSocket open to the app for as long as the
 - `sync_offset_ms` — the app's clock minus this machine's, in ms; `sync_rtt_ms` — round trip of the best clock sample. Both blank on an app without sync protocol v2
 - `producer_time` — the app's local `HH:MM:SS` from the synced clock; `producer_utc_offset` (`UTC-04:00`), `producer_utc_offset_seconds` — its time zone. Blank until synced
 - `app_mode`
+- `event_time_live`, `event_time_next` — display names of the live and next event times (blank when none or on an older Producer); `event_time_count` — how many event times exist
 - `plan_title`, `plan_item_count`, `plan_item_index`, `plan_is_at_end`
 - `active_item_title`, `active_item_type`, `active_item_service_plan_title`
 - `active_item_remaining` (formatted like the app's own screen, e.g. `1:35:00`; counted locally from the timer anchor on sync protocol v2, otherwise the pushed string), `active_item_remaining_seconds`, `active_item_is_overtime`, `active_item_is_running`
@@ -146,7 +154,7 @@ Once connected, this module holds a WebSocket open to the app for as long as the
 
 ## Presets
 
-Drag-in buttons for what a producer actually reaches for mid-service, grouped into sections: **Cues** (plus **Cues — Toggle** and **Cues — Per Role**: for every role on the show a cycle button painted in the role's live cue colour, and Standby / Go / Clear buttons that light when they match), **Timer Transport** (start/pause/reset plus ±10s/±30s/±1m/±5m nudges), **Service Navigation** (prev/next/next-service, **Next Item (Hold Clock)**, a live item-and-remaining status button that turns red under threshold or in overtime, and a countdown that goes amber at 60s and red at 30s), **Service Timing** (projected end, time remaining, over/under, next item length, and a progress readout with a bar), **Rundown** (eight rows of the plan with the live one highlighted, plus page up/down), **Timer Entry**, **Waypoints** (including **Go To Next Waypoint**), **Service Schedules**, **Projected / Actual**, **Messages**, **Planning Center**, and **Status Displays** (including a stale-link banner, a **Connection Health** button showing state, v2/legacy and round trip, and a last-action-error readout). Overtime red on the countdown presets follows the config checkbox.
+Drag-in buttons for what a producer actually reaches for mid-service, grouped into sections: **Cues** (plus **Cues — Toggle** and **Cues — Per Role**: for every role on the show a cycle button painted in the role's live cue colour, and Standby / Go / Clear buttons that light when they match), **Timer Transport** (start/pause/reset plus ±10s/±30s/±1m/±5m nudges), **Service Navigation** (prev/next/next-service, **Next Item (Hold Clock)**, a live item-and-remaining status button that turns red under threshold or in overtime, and a countdown that goes amber at 60s and red at 30s), **Service Timing** (projected end, time remaining, over/under, next item length, and a progress readout with a bar), **Rundown** (eight rows of the plan with the live one highlighted, plus page up/down), **Timer Entry**, **Waypoints** (including **Go To Next Waypoint**), **Service Schedules**, **Event Times**, **Projected / Actual**, **Messages**, **Planning Center**, and **Status Displays** (including a stale-link banner, a **Connection Health** button showing state, v2/legacy and round trip, and a last-action-error readout). Overtime red on the countdown presets follows the config checkbox.
 
 Buttons are ordinary Companion presets: one image slot per button. The grey gradient plate and the Font Awesome icon arrive pre-flattened into that single image, drawn over the button's own background colour, with the label as text on top. Feedbacks therefore recolour the background (the plate is translucent, so it shows through) and cannot repaint the icon on its own. Layered presets, where each layer is repainted separately, need `@companion-module/base` 2.x, which Companion 5.0.4 still refuses to load; this module stays on 1.14 until that changes.
 

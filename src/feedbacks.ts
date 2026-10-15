@@ -464,6 +464,20 @@ export function getFeedbackDefinitions(state: ModuleState): CompanionFeedbackDef
 			},
 		},
 
+		hasNextEventTime: {
+			type: 'boolean',
+			name: 'Next Event Time Available',
+			description: 'True when the live event time is not the last one, so Next Event Time has somewhere to go.',
+			options: [],
+			defaultStyle: {
+				bgcolor: combineRgb(74, 144, 226),
+				color: combineRgb(255, 255, 255),
+			},
+			callback: () => {
+				return !!state.eventTimes?.nextId
+			},
+		},
+
 		plotipharPaired: {
 			type: 'boolean',
 			name: 'Plotiphar Paired',
