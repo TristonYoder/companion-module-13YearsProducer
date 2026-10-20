@@ -52,6 +52,43 @@ export interface RoleCue {
 	plotipharRoleId: string | null
 	lastUpdated: string
 	assignedNoteCategories: string[]
+	clockFormat?: ClockFormatValue | null
+	pcoTeamPosition?: string | null
+	pagerFields?: string[]
+	pagerItems?: string[]
+}
+
+export interface PCOItemLeader {
+	personId?: string | null
+	teamPositionId?: string | null
+	name: string
+	firstName: string
+}
+
+export interface PCOItemTime {
+	id: string
+	planTimeId?: string | null
+	length?: number | null
+	exclude?: boolean
+}
+
+export interface PCOItemDetails {
+	description?: string | null
+	servicePosition?: 'pre' | 'during' | 'post'
+	keyName?: string | null
+	song?: { id: string; title?: string | null; author?: string | null } | null
+	arrangement?: {
+		id: string
+		name?: string | null
+		bpm?: number | null
+		meter?: string | null
+		sequenceShort?: string[]
+	} | null
+	key?: { id: string; name?: string | null; startingKey?: string | null } | null
+	customSequenceShort?: string[]
+	media?: { id: string; title?: string | null; mediaType?: string | null } | null
+	itemTimes?: PCOItemTime[]
+	leaders?: PCOItemLeader[]
 }
 
 export interface PCOTimerItem {
@@ -68,6 +105,7 @@ export interface PCOTimerItem {
 	pcoServiceTypeId: string | null
 	pcoPlanId: string | null
 	isDurationActual: boolean
+	details?: PCOItemDetails | null
 }
 
 export function planItemRemainingSeconds(item: PCOTimerItem): number {
@@ -113,6 +151,8 @@ export interface ActiveTimer {
 	formattedRemaining: string
 	isDurationActualForDisplay: boolean
 	anchor?: TimerAnchor | null
+	nextItem?: PCOTimerItem | null
+	nextStartsAtMs?: number | null
 }
 
 export interface PlanStatus {
@@ -148,6 +188,22 @@ export interface PCOStatus {
 	serviceTypes: IdentifiedName[]
 	plans: PCOPlanInfo[]
 	noteCategories: IdentifiedName[]
+	planContext?: PCOPlanContext | null
+}
+
+export interface PCOPlanTime {
+	id: string
+	name?: string | null
+	timeType?: string | null
+	startsAt?: string | null
+	endsAt?: string | null
+}
+
+export interface PCOPlanContext {
+	planId?: string
+	title?: string | null
+	seriesTitle?: string | null
+	times?: PCOPlanTime[]
 }
 
 export const PCO_PLAN_FILTERS: { id: string; label: string }[] = [
@@ -176,8 +232,20 @@ export const HOUR_FORMAT_THRESHOLDS: { id: HourFormatThreshold; label: string }[
 	{ id: 'never', label: 'Never — always MM:SS' },
 ]
 
+export type ClockFormatValue = 'twelveHour' | 'twentyFourHour'
+
+export const CLOCK_FORMATS: { id: ClockFormatValue; label: string }[] = [
+	{ id: 'twelveHour', label: '12-hour (2:30 PM)' },
+	{ id: 'twentyFourHour', label: '24-hour (14:30)' },
+]
+
+export function isClockFormat(value: unknown): value is ClockFormatValue {
+	return value === 'twelveHour' || value === 'twentyFourHour'
+}
+
 export interface SettingsStatus {
 	hourFormatThreshold: HourFormatThreshold
+	clockFormat?: ClockFormatValue | ''
 	controlAPIPort: number
 	connectedAPIClients: number
 }
@@ -238,6 +306,58 @@ export interface TimerEndAtBody {
 	time: string
 }
 
+export interface ItemActual {
+	itemId: string
+	eventTimeId?: string | null
+	startedAt: string
+	endedAt?: string | null
+	lengthSeconds?: number | null
+}
+
+export interface LiveOpsStatus {
+	isRehearsalMode: boolean
+	rehearsalPlanTimeId?: string | null
+	actualsEventTimeId?: string | null
+	actuals: ItemActual[]
+	skippedItemIds: Record<string, string[]>
+}
+
+export interface ActualsStatus {
+	eventTimeId?: string | null
+	isLogging: boolean
+	actuals: ItemActual[]
+}
+
+export interface SkipsStatus {
+	eventTimeId?: string | null
+	skippedItemIds: string[]
+	all: Record<string, string[]>
+}
+
+export interface SkipBody {
+	skipped: boolean
+}
+
+export interface RehearsalStatus {
+	enabled: boolean
+	planTimeId?: string | null
+	availableTimes: PCOPlanTime[]
+}
+
+export interface RehearsalBody {
+	enabled: boolean
+	planTimeId?: string
+}
+
+export interface SaveActualsReply {
+	count: number
+}
+
+export interface SettingsUpdateBody {
+	hourFormatThreshold?: string
+	clockFormat?: ClockFormatValue
+}
+
 export interface ControlAPIState {
 	appMode: string
 	utcOffsetSeconds?: number
@@ -254,6 +374,7 @@ export interface ControlAPIState {
 	waypoints: WaypointStatus[]
 	schedules: ScheduleStatus
 	eventTimes?: EventTimesStatus
+	liveOps?: LiveOpsStatus
 	rev?: number
 	serverNowMs?: number
 	epoch?: number
@@ -345,6 +466,7 @@ export interface CommandReply {
 export interface RoleUpdateBody {
 	name?: string
 	personName?: string
+	clockFormat?: ClockFormatValue | 'default'
 	plotipharRoleId?: string
 	assignedNoteCategories?: string[]
 	state?: CueStateValue

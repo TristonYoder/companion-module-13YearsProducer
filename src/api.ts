@@ -2,6 +2,7 @@ import WebSocket from 'ws'
 import { describeConnectionError } from './connection.js'
 import type {
 	ActiveTimer,
+	ActualsStatus,
 	CommandReply,
 	ControlAPIErrorBody,
 	ControlAPIState,
@@ -18,10 +19,16 @@ import type {
 	PlanItemUpdateBody,
 	PlanStatus,
 	PlotipharStatus,
+	RehearsalBody,
+	RehearsalStatus,
 	RoleCue,
 	RoleUpdateBody,
+	SaveActualsReply,
 	SettingsStatus,
+	SettingsUpdateBody,
 	ServerEvent,
+	SkipBody,
+	SkipsStatus,
 	StartTimerBody,
 	SyncReplyData,
 	TimerRemainingBody,
@@ -351,8 +358,8 @@ export class ControlApi {
 		return this.get('/settings')
 	}
 
-	async updateSettings(hourFormatThreshold?: string): Promise<SettingsStatus> {
-		return this.send('PATCH', '/settings', { hourFormatThreshold })
+	async updateSettings(body: SettingsUpdateBody): Promise<SettingsStatus> {
+		return this.send('PATCH', '/settings', body)
 	}
 
 	async listMessages(): Promise<InterTeamMessage[]> {
@@ -444,6 +451,31 @@ export class ControlApi {
 
 	async timerEndAt(time: string): Promise<ControlAPIState> {
 		return this.send('POST', '/timer/end-at', { time } satisfies TimerEndAtBody)
+	}
+
+	async getActuals(): Promise<ActualsStatus> {
+		return this.get('/plan/actuals')
+	}
+
+	async saveActualsToPco(): Promise<SaveActualsReply> {
+		return this.send('POST', '/plan/actuals/save-to-pco')
+	}
+
+	async getSkips(): Promise<SkipsStatus> {
+		return this.get('/plan/skips')
+	}
+
+	async setItemSkipped(itemId: string, skipped: boolean): Promise<SkipsStatus> {
+		return this.send('POST', `/plan/items/${encodeURIComponent(itemId)}/skip`, { skipped } satisfies SkipBody)
+	}
+
+	async getRehearsal(): Promise<RehearsalStatus> {
+		return this.get('/rehearsal')
+	}
+
+	async setRehearsal(enabled: boolean, planTimeId?: string): Promise<RehearsalStatus> {
+		const body: RehearsalBody = planTimeId ? { enabled, planTimeId } : { enabled }
+		return this.send('PUT', '/rehearsal', body)
 	}
 
 	async scheduleGoLive(id: string): Promise<ControlAPIState> {

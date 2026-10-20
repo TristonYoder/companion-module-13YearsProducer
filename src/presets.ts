@@ -1,6 +1,7 @@
 import { combineRgb } from '@companion-module/base'
 import type { CompanionPresetDefinitions, CompanionButtonStyleProps } from '@companion-module/base'
 import {
+	companionDisabledText,
 	companionInfo,
 	companionNeutral,
 	companionRemote,
@@ -27,6 +28,7 @@ const DARK = combineRgb(...cueOff)
 const AMBER = combineRgb(...cueStandby)
 const PURPLE = combineRgb(...companionRemote)
 const INK_DARK = combineRgb(...cueDarkText)
+const DIM_TEXT = combineRgb(...companionDisabledText)
 
 const USE_GLYPH_KEY_FACES = true
 
@@ -353,7 +355,10 @@ export function getPresetDefinitions(
 				color: DARK,
 				size: 'auto',
 			}),
-			feedbacks: [{ feedbackId: 'planItemIsActive', options: { rowIndex: row }, style: bg(GREEN) }],
+			feedbacks: [
+				{ feedbackId: 'rundownRowSkipped', options: { rowIndex: row }, style: { color: DIM_TEXT } },
+				{ feedbackId: 'planItemIsActive', options: { rowIndex: row }, style: bg(GREEN) },
+			],
 			steps: [{ down: [{ actionId: 'planJumpToRow', options: { rowIndex: row } }], up: [] }],
 		}
 	}
@@ -611,6 +616,106 @@ export function getPresetDefinitions(
 		steps: [{ down: [], up: [] }],
 	}
 
+	presets['run_sheet_skip_next'] = {
+		type: 'button',
+		category: 'Run Sheet',
+		name: 'Skip Next Item',
+		style: face({ icon: 'skip', label: 'Skip\\n$(13yearsproducer:next_item_title)', color: GREY, size: 'auto' }),
+		feedbacks: [],
+		steps: [{ down: [{ actionId: 'planSkipItem', options: { target: 'next', itemId: '', mode: 'skip' } }], up: [] }],
+	}
+
+	presets['run_sheet_skip_live'] = {
+		type: 'button',
+		category: 'Run Sheet',
+		name: 'Skip / Unskip Live Item',
+		style: face({ icon: 'skip', label: 'Skip Live', color: GREY }),
+		feedbacks: [{ feedbackId: 'planItemSkipped', options: { itemId: '' }, style: { bgcolor: DARK, color: DIM_TEXT } }],
+		steps: [{ down: [{ actionId: 'planSkipItem', options: { target: 'live', itemId: '', mode: 'toggle' } }], up: [] }],
+	}
+
+	presets['run_sheet_rehearsal'] = {
+		type: 'button',
+		category: 'Run Sheet',
+		name: 'Rehearsal Mode (toggle)',
+		style: face({ icon: 'rehearsal', label: 'Rehearsal', color: GREY }),
+		feedbacks: [{ feedbackId: 'rehearsalMode', options: {}, style: { bgcolor: AMBER, color: INK_DARK } }],
+		steps: [{ down: [{ actionId: 'rehearsalMode', options: { mode: 'toggle', planTimeId: '' } }], up: [] }],
+	}
+
+	presets['run_sheet_actuals'] = {
+		type: 'button',
+		category: 'Run Sheet',
+		name: 'Actual vs. Planned (status)',
+		style: face({
+			icon: 'actuals',
+			label: 'Actual\\n$(13yearsproducer:actual_over_under)',
+			color: DARK,
+			size: 'auto',
+		}),
+		feedbacks: [{ feedbackId: 'rehearsalMode', options: {}, style: { bgcolor: AMBER, color: INK_DARK } }],
+		steps: [{ down: [], up: [] }],
+	}
+
+	presets['run_sheet_live_music'] = {
+		type: 'button',
+		category: 'Run Sheet',
+		name: 'Live Item Key · BPM · Meter (status)',
+		style: face({ icon: 'music', label: '$(13yearsproducer:active_item_music)', color: DARK, size: 'auto' }),
+		feedbacks: [],
+		steps: [{ down: [], up: [] }],
+	}
+
+	presets['run_sheet_next_music'] = {
+		type: 'button',
+		category: 'Run Sheet',
+		name: 'Next Item Key · BPM · Meter (status)',
+		style: face({
+			icon: 'music',
+			label: 'Next\\n$(13yearsproducer:next_item_music)',
+			color: DARK,
+			size: 'auto',
+		}),
+		feedbacks: [],
+		steps: [{ down: [], up: [] }],
+	}
+
+	presets['run_sheet_live_leader'] = {
+		type: 'button',
+		category: 'Run Sheet',
+		name: 'Live Item Leader (status)',
+		style: face({ icon: 'roles', label: '$(13yearsproducer:active_item_leader)', color: DARK, size: 'auto' }),
+		feedbacks: [],
+		steps: [{ down: [], up: [] }],
+	}
+
+	presets['clock_producer'] = {
+		type: 'button',
+		category: 'Clock',
+		name: 'Producer Clock (press for 12/24-hour)',
+		style: face({ icon: 'timerClock', label: '$(13yearsproducer:producer_clock)', color: DARK, size: 'auto' }),
+		feedbacks: [],
+		steps: [{ down: [{ actionId: 'setClockFormat', options: { format: 'toggle' } }], up: [] }],
+	}
+
+	presets['clock_format_12'] = {
+		type: 'button',
+		category: 'Clock',
+		name: '12-hour Clock',
+		style: face({ icon: 'timerClock', label: '12-hour', color: GREY }),
+		feedbacks: [{ feedbackId: 'clockFormatIs', options: { format: 'twelveHour' }, style: bg(BLUE) }],
+		steps: [{ down: [{ actionId: 'setClockFormat', options: { format: 'twelveHour' } }], up: [] }],
+	}
+
+	presets['clock_format_24'] = {
+		type: 'button',
+		category: 'Clock',
+		name: '24-hour Clock',
+		style: face({ icon: 'timerClock', label: '24-hour', color: GREY }),
+		feedbacks: [{ feedbackId: 'clockFormatIs', options: { format: 'twentyFourHour' }, style: bg(BLUE) }],
+		steps: [{ down: [{ actionId: 'setClockFormat', options: { format: 'twentyFourHour' } }], up: [] }],
+	}
+
 	presets['duration_toggle_live'] = {
 		type: 'button',
 		category: 'Projected / Actual',
@@ -705,6 +810,15 @@ export function getPresetDefinitions(
 		style: face({ icon: 'pcoSync', label: 'Release', color: GREY }),
 		feedbacks: [],
 		steps: [{ down: [{ actionId: 'pcoSetLiveSync', options: { enabled: false } }], up: [] }],
+	}
+
+	presets['pco_save_actuals'] = {
+		type: 'button',
+		category: 'Planning Center',
+		name: 'Save Actual Lengths To Planning Center',
+		style: face({ icon: 'actuals', label: 'Save Actuals', color: GREY }),
+		feedbacks: [],
+		steps: [{ down: [{ actionId: 'actualsSaveToPco', options: {} }], up: [] }],
 	}
 
 	presets['pco_status'] = {

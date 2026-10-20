@@ -1,11 +1,17 @@
 import { ClockSync, anchorElapsedMs, anchorElapsedSeconds, anchorRemainingSeconds, monotonicEpochNow } from './sync.js'
 import { formatDuration, parseTimerInput, previewText, resolvedSeconds, signOf, withSign } from './timerEntry.js'
 import type { TimerEntrySign, TimerInputAction } from './timerEntry.js'
+import { isHeaderItem } from './itemDetails.js'
+import { isClockFormat } from './types.js'
 import type {
 	ActiveTimer,
+	ClockFormatValue,
 	ControlAPIState,
 	InterTeamMessage,
+	ItemActual,
+	LiveOpsStatus,
 	NetworkStatus,
+	PCOPlanTime,
 	PCOStatus,
 	PCOTimerItem,
 	PlanStatus,
@@ -37,6 +43,26 @@ export const MAX_REV_JUMP = 1_000_000
 
 export const ANCHOR_MAX_LENGTH_SECONDS = 604_800
 export const ANCHOR_MAX_ELAPSED_MS = 604_800_000
+
+export const ADHOC_SKIPS_KEY = 'adhoc'
+export const REHEARSAL_SKIPS_KEY = 'rehearsal'
+
+export function formatClockParts(
+	hours: number,
+	minutes: number,
+	seconds: number | null,
+	format: ClockFormatValue | null,
+): string {
+	const pad = (n: number) => String(n).padStart(2, '0')
+	if (format === 'twelveHour') {
+		const hour12 = hours % 12 === 0 ? 12 : hours % 12
+		const suffix = hours < 12 ? 'AM' : 'PM'
+		return seconds === null
+			? `${hour12}:${pad(minutes)} ${suffix}`
+			: `${hour12}:${pad(minutes)}:${pad(seconds)} ${suffix}`
+	}
+	return seconds === null ? `${pad(hours)}:${pad(minutes)}` : `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`
+}
 
 export function formatMinutesSeconds(totalSeconds: number): string {
 	const seconds = Math.max(0, Math.floor(totalSeconds))
@@ -397,9 +423,146 @@ export class ModuleState {
 	}
 
 	nextPlanItem(): PCOTimerItem | undefined {
+		const timer = this.timer
+		if (timer && 'nextItem' in timer) return timer.nextItem ?? undefined
 		const plan = this.plan
 		if (!plan) return undefined
-		return plan.items[plan.activeItemIndex + 1]
+		return plan.items
+			.slice(plan.activeItemIndex + 1)
+			.find((item) => !isHeaderItem(item) && !this.isItemPassedOver(item))
+	}
+
+	get clockFormat(): ClockFormatValue | null {
+		const format = this.settings?.clockFormat
+		return isClockFormat(format) ? format : null
+	}
+
+	formatClockMs(ms: number, withSeconds = false): string {
+		const offset = this.producerUtcOffsetSeconds
+		const date = new Date(offset === null ? ms : ms + offset * 1000)
+		const hours = offset === null ? date.getHours() : date.getUTCHours()
+		const minutes = offset === null ? date.getMinutes() : date.getUTCMinutes()
+		const seconds = offset === null ? date.getSeconds() : date.getUTCSeconds()
+		return formatClockParts(hours, minutes, withSeconds ? seconds : null, this.clockFormat)
+	}
+
+	get producerClockText(): string {
+		if (this.producerUtcOffsetSeconds === null || !this.sync.hasOffset) return ''
+		return this.formatClockMs(this.sync.producerNowMs())
+	}
+
+	get itemEndsAtClockText(): string {
+		const end = this.itemEndsAtMs
+		return end === null ? '' : this.formatClockMs(end)
+	}
+
+	get projectedEndClockText(): string {
+		const end = this.projectedEndMs
+		return end === null ? '' : this.formatClockMs(end)
+	}
+
+	get nextItemStartsAtText(): string {
+		const startsAt = this.timer?.nextStartsAtMs
+		return typeof startsAt === 'number' && Number.isFinite(startsAt) ? this.formatClockMs(startsAt) : ''
+	}
+
+	get liveOps(): LiveOpsStatus | null {
+		const liveOps = this.snapshot?.liveOps
+		return liveOps && typeof liveOps === 'object' ? liveOps : null
+	}
+
+	get isRehearsalMode(): boolean {
+		return this.liveOps?.isRehearsalMode === true
+	}
+
+	get skipsKey(): string {
+		if (this.isRehearsalMode) return REHEARSAL_SKIPS_KEY
+		return this.eventTimes?.liveId || ADHOC_SKIPS_KEY
+	}
+
+	get skippedItemIds(): string[] {
+		const ids = this.liveOps?.skippedItemIds?.[this.skipsKey]
+		return Array.isArray(ids) ? ids : []
+	}
+
+	isItemSkipped(id: string): boolean {
+		return this.skippedItemIds.includes(id)
+	}
+
+	get activePlanTimeId(): string | null {
+		const live = this.liveEventTime?.pcoPlanTimeId ?? null
+		if (this.isRehearsalMode) return this.liveOps?.rehearsalPlanTimeId ?? live
+		return live
+	}
+
+	isItemExcluded(item: PCOTimerItem): boolean {
+		const planTimeId = this.activePlanTimeId
+		if (!planTimeId) return false
+		const times = item.details?.itemTimes
+		if (!Array.isArray(times)) return false
+		return times.some((time) => time.planTimeId === planTimeId && time.exclude === true)
+	}
+
+	isItemPassedOver(item: PCOTimerItem): boolean {
+		if (isHeaderItem(item)) return false
+		return this.isItemSkipped(item.id) || this.isItemExcluded(item)
+	}
+
+	get rehearsalTimes(): PCOPlanTime[] {
+		const times = this.pco?.planContext?.times
+		return Array.isArray(times) ? times.filter((time) => time.timeType === 'rehearsal') : []
+	}
+
+	get rehearsalTime(): PCOPlanTime | undefined {
+		if (!this.isRehearsalMode) return undefined
+		const id = this.liveOps?.rehearsalPlanTimeId
+		const times = this.rehearsalTimes
+		return id ? times.find((time) => time.id === id) : undefined
+	}
+
+	planTimeLabel(time: PCOPlanTime): string {
+		const name = time.name?.trim()
+		if (name) return name
+		const starts = time.startsAt ? Date.parse(time.startsAt) : NaN
+		return Number.isNaN(starts) ? time.id : this.formatClockMs(starts)
+	}
+
+	rehearsalTimeChoices(): { id: string; label: string }[] {
+		return this.rehearsalTimes.map((time) => ({ id: time.id, label: this.planTimeLabel(time) }))
+	}
+
+	get isLoggingActuals(): boolean {
+		return this.liveOps !== null && !this.isRehearsalMode
+	}
+
+	get currentActuals(): ItemActual[] {
+		const liveOps = this.liveOps
+		if (!liveOps || !Array.isArray(liveOps.actuals)) return []
+		const eventTimeId = liveOps.actualsEventTimeId ?? null
+		return liveOps.actuals.filter((actual) => (actual.eventTimeId ?? null) === eventTimeId)
+	}
+
+	get completedActuals(): ItemActual[] {
+		return this.currentActuals.filter((actual) => !!actual.endedAt && typeof actual.lengthSeconds === 'number')
+	}
+
+	get actualOverUnderSeconds(): number | null {
+		const items = new Map((this.plan?.items ?? []).map((item) => [item.id, item]))
+		let total = 0
+		let counted = 0
+		for (const actual of this.completedActuals) {
+			const item = items.get(actual.itemId)
+			if (!item) continue
+			total += (actual.lengthSeconds ?? 0) - item.lengthInSeconds
+			counted++
+		}
+		return counted === 0 ? null : total
+	}
+
+	get actualOverUnderText(): string {
+		const delta = this.actualOverUnderSeconds
+		if (delta === null) return ''
+		return `${delta < 0 ? '-' : '+'}${this.formatSeconds(Math.abs(delta))}`
 	}
 
 	roleSlugs(): Map<string, string> {
@@ -534,7 +697,10 @@ export class ModuleState {
 		const timer = this.timer
 		const plan = this.plan
 		if (!timer || !plan) return null
-		const after = plan.items.slice(plan.activeItemIndex + 1).reduce((sum, item) => sum + item.lengthInSeconds, 0)
+		const after = plan.items
+			.slice(plan.activeItemIndex + 1)
+			.filter((item) => !this.isItemPassedOver(item))
+			.reduce((sum, item) => sum + item.lengthInSeconds, 0)
 		return Math.max(0, this.timerRemainingSeconds ?? 0) + after
 	}
 
@@ -564,7 +730,9 @@ export class ModuleState {
 		if (end === null || !schedule || !plan) return ''
 		const startsAt = new Date(schedule.startsAt).getTime()
 		if (Number.isNaN(startsAt)) return ''
-		const planned = plan.items.reduce((sum, item) => sum + item.lengthInSeconds, 0)
+		const planned = plan.items
+			.filter((item) => !this.isItemPassedOver(item))
+			.reduce((sum, item) => sum + item.lengthInSeconds, 0)
 		const delta = Math.round((end - (startsAt + planned * 1000)) / 1000)
 		return `${delta < 0 ? '-' : '+'}${this.formatSeconds(Math.abs(delta))}`
 	}
@@ -591,6 +759,11 @@ export class ModuleState {
 		return this.plan?.items[this.rundownPageIndex * RUNDOWN_ROWS + row - 1]
 	}
 
+	isRundownRowSkipped(row: number): boolean {
+		const item = this.rundownRow(row)
+		return item ? this.isItemPassedOver(item) : false
+	}
+
 	isRundownRowActive(row: number): boolean {
 		const plan = this.plan
 		if (!plan) return false
@@ -604,6 +777,8 @@ export class ModuleState {
 			this.waypoints.map((w) => [w.id, w.slug, w.name]),
 			this.scheduleEntries.map((e) => [e.id, e.title]),
 			this.eventTimeEntries.map((e) => [e.id, e.displayName]),
+			this.rehearsalTimes.map((t) => [t.id, t.name ?? null, t.startsAt ?? null]),
+			this.clockFormat,
 			[
 				this.pco?.selectedServiceTypeId ?? null,
 				this.pco?.defaultServiceTypeId ?? null,

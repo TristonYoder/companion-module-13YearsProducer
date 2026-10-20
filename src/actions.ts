@@ -9,6 +9,9 @@ import {
 	APP_MODES,
 	PCO_PLAN_FILTERS,
 	HOUR_FORMAT_THRESHOLDS,
+	CLOCK_FORMATS,
+	isClockFormat,
+	type ClockFormatValue,
 	SCHEDULE_RECURRENCES,
 	nextCueStateInCycle,
 	type PlanItemUpdateBody,
@@ -64,6 +67,15 @@ function explainWaypointFailure(err: ApiError): string | undefined {
 	return undefined
 }
 
+const NEEDS_1_7 = 'needs 13 Years 1.7.0 or later on the Producer'
+
+function explainUnknownRoute(feature: string, more?: (err: ApiError) => string | undefined) {
+	return (err: ApiError): string | undefined => {
+		if (err.status === 404 && err.message === 'Unknown path') return `${feature} ${NEEDS_1_7}.`
+		return more?.(err)
+	}
+}
+
 const START_TIMER_OPTION = {
 	type: 'checkbox',
 	id: 'startTimer',
@@ -100,6 +112,7 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 	const waypointChoices = deps.state.waypointChoices()
 	const scheduleChoices = deps.state.scheduleChoices()
 	const eventTimeChoices = deps.state.eventTimeChoices()
+	const rehearsalTimeChoices = [{ id: '', label: 'First rehearsal time' }, ...deps.state.rehearsalTimeChoices()]
 	const serviceTypeChoices = (deps.state.pco?.serviceTypes ?? []).map((t) => ({ id: t.id, label: t.name }))
 	const planChoices = (deps.state.pco?.plans ?? []).map((p) => ({ id: p.id, label: p.title }))
 	const noteCategoryChoices = (deps.state.pco?.noteCategories ?? []).map((c) => ({ id: c.id, label: c.name }))
@@ -935,6 +948,17 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 					default: false,
 				},
 				{
+					type: 'dropdown',
+					id: 'clockFormat',
+					label: 'Clock format on this role\u2019s pagers',
+					choices: [
+						{ id: '', label: 'Leave unchanged' },
+						{ id: 'default', label: 'Follow the Producer' },
+						...CLOCK_FORMATS,
+					],
+					default: '',
+				},
+				{
 					type: 'checkbox',
 					id: 'setNoteCategories',
 					label: 'Replace the assigned note categories',
@@ -958,6 +982,8 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 				if (name) body.name = name
 				if (action.options.clearPerson === true) body.personName = ''
 				else if (personName) body.personName = personName
+				const clockFormat = optString(action.options.clockFormat)
+				if (clockFormat === 'default' || isClockFormat(clockFormat)) body.clockFormat = clockFormat
 				if (action.options.setNoteCategories === true) {
 					const selected = action.options.assignedNoteCategories
 					body.assignedNoteCategories = Array.isArray(selected) ? selected.map(optString).filter(Boolean) : []
@@ -1069,7 +1095,43 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 			],
 			callback: guarded(async (action) => {
 				const hourFormatThreshold = optString(action.options.hourFormatThreshold)
-				await deps.api.updateSettings(hourFormatThreshold)
+				await deps.api.updateSettings({ hourFormatThreshold })
+			}, deps),
+		},
+
+		setClockFormat: {
+			name: 'Set Clock Format (12/24-hour)',
+			description:
+				"Sets how the pagers show the producer clock and times of day. Roles with their own clock format keep it. Toggle flips the Producer's current setting.",
+			options: [
+				{
+					type: 'dropdown',
+					id: 'format',
+					label: 'Clock format',
+					choices: [...CLOCK_FORMATS, { id: 'toggle', label: 'Toggle 12/24-hour' }],
+					default: 'toggle',
+				},
+			],
+			callback: guarded(async (action) => {
+				const requested = optString(action.options.format)
+				let format: ClockFormatValue
+				if (requested === 'toggle') {
+					const current = deps.state.clockFormat
+					if (!current) {
+						deps.log('warn', `Toggling the clock format ${NEEDS_1_7}.`)
+						return
+					}
+					format = current === 'twelveHour' ? 'twentyFourHour' : 'twelveHour'
+				} else if (isClockFormat(requested)) {
+					format = requested
+				} else {
+					deps.log('warn', `Set Clock Format needs 12-hour or 24-hour, not "${requested}".`)
+					return
+				}
+				const settings = await deps.api.updateSettings({ clockFormat: format })
+				if (!isClockFormat(settings?.clockFormat)) {
+					deps.log('warn', `Setting the clock format ${NEEDS_1_7}; this one ignored it.`)
+				}
 			}, deps),
 		},
 
@@ -1436,6 +1498,130 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 				},
 				deps,
 				(err) => (err.status === 409 ? 'There is no next event time.' : undefined),
+			),
+		},
+
+		planSkipItem: {
+			name: 'Skip / Unskip Item',
+			description:
+				'Skips an item for the live event time (rehearsal has its own list): it is dimmed in the run sheet and passed over by Next, Previous and the next item the pagers show. Jumping straight to it still works.',
+			options: [
+				{
+					type: 'dropdown',
+					id: 'target',
+					label: 'Item',
+					choices: [
+						{ id: 'next', label: 'The next item' },
+						{ id: 'live', label: 'The live item' },
+						{ id: 'item', label: 'A specific item' },
+					],
+					default: 'next',
+				},
+				{
+					type: 'dropdown',
+					id: 'itemId',
+					label: 'Plan item',
+					choices: planItemChoices,
+					default: planItemChoices[0]?.id ?? '',
+					allowCustom: true,
+					isVisibleExpression: "$(options:target) == 'item'",
+				},
+				{
+					type: 'dropdown',
+					id: 'mode',
+					label: 'Action',
+					choices: [
+						{ id: 'skip', label: 'Skip' },
+						{ id: 'unskip', label: 'Unskip' },
+						{ id: 'toggle', label: 'Toggle' },
+					],
+					default: 'toggle',
+				},
+			],
+			callback: guarded(
+				async (action) => {
+					const target = optString(action.options.target) || 'next'
+					const itemId =
+						target === 'live'
+							? deps.state.timer?.item.id
+							: target === 'item'
+								? optString(action.options.itemId).trim()
+								: deps.state.nextPlanItem()?.id
+					if (!itemId) {
+						deps.log(
+							'warn',
+							target === 'item' ? 'Skip / Unskip Item needs a plan item.' : `There is no ${target} item to skip.`,
+						)
+						return
+					}
+					const mode = optString(action.options.mode)
+					const skipped = mode === 'skip' ? true : mode === 'unskip' ? false : !deps.state.isItemSkipped(itemId)
+					await deps.api.setItemSkipped(itemId, skipped)
+				},
+				deps,
+				explainUnknownRoute('Skipping items', (err) => {
+					if (err.status === 404) return 'That item is not in the plan currently loaded.'
+					if (err.status === 400) return 'Headers cannot be skipped.'
+					return undefined
+				}),
+			),
+		},
+
+		rehearsalMode: {
+			name: 'Rehearsal Mode',
+			description:
+				'Rehearsal times the run sheet from a Planning Center rehearsal time, records no actuals and does not step Planning Center Live. Turning it off returns to the live event time, which rehearsal never changes.',
+			options: [
+				{
+					type: 'dropdown',
+					id: 'mode',
+					label: 'Rehearsal',
+					choices: [
+						{ id: 'on', label: 'On' },
+						{ id: 'off', label: 'Off' },
+						{ id: 'toggle', label: 'Toggle' },
+					],
+					default: 'toggle',
+				},
+				{
+					type: 'dropdown',
+					id: 'planTimeId',
+					label: 'Rehearsal time',
+					choices: rehearsalTimeChoices,
+					default: '',
+					allowCustom: true,
+					isVisibleExpression: "$(options:mode) != 'off'",
+				},
+			],
+			callback: guarded(
+				async (action) => {
+					const mode = optString(action.options.mode)
+					const enabled = mode === 'on' ? true : mode === 'off' ? false : !deps.state.isRehearsalMode
+					const planTimeId = optString(action.options.planTimeId).trim()
+					await deps.api.setRehearsal(enabled, enabled && planTimeId ? planTimeId : undefined)
+				},
+				deps,
+				explainUnknownRoute('Rehearsal mode', (err) =>
+					err.status === 404 ? 'That is not a rehearsal time of the plan currently loaded.' : undefined,
+				),
+			),
+		},
+
+		actualsSaveToPco: {
+			name: 'Save Actual Lengths To Planning Center',
+			description:
+				'Writes the recorded actual lengths into the Planning Center plan: every synced item whose actual differs gets it as its planned length (Planning Center keeps one length per item, for every event time).',
+			options: [],
+			callback: guarded(
+				async () => {
+					const reply = await deps.api.saveActualsToPco()
+					deps.log('info', `Saving ${reply?.count ?? 0} actual length(s) to Planning Center.`)
+				},
+				deps,
+				explainUnknownRoute('Saving actuals', (err) => {
+					if (err.status !== 409) return undefined
+					return `Nothing saved: ${err.message.replace(/\.$/, '')}.`
+				}),
 			),
 		},
 

@@ -13,7 +13,14 @@ import {
 	cueStandby,
 	timerOvertime,
 } from './palette.js'
-import { optString, CUE_STATES, CUE_STATE_COLOR, CUE_STATE_TEXT_COLOR, CUE_STATE_LABELS } from './types.js'
+import {
+	optString,
+	CLOCK_FORMATS,
+	CUE_STATES,
+	CUE_STATE_COLOR,
+	CUE_STATE_TEXT_COLOR,
+	CUE_STATE_LABELS,
+} from './types.js'
 
 export function getFeedbackDefinitions(state: ModuleState): CompanionFeedbackDefinitions {
 	const roleChoices = state.roleChoices()
@@ -209,6 +216,89 @@ export function getFeedbackDefinitions(state: ModuleState): CompanionFeedbackDef
 			},
 			callback: (feedback) => {
 				return state.isRundownRowActive(Number(feedback.options.rowIndex))
+			},
+		},
+
+		rundownRowSkipped: {
+			type: 'boolean',
+			name: 'Rundown Row Is Skipped',
+			description:
+				'True when the item on this row is skipped, or excluded from the live event time in Planning Center, so Next passes over it.',
+			options: [
+				{
+					type: 'number',
+					id: 'rowIndex',
+					label: 'Row (1-8 on the current rundown page)',
+					default: 1,
+					min: 1,
+					max: RUNDOWN_ROWS,
+				},
+			],
+			defaultStyle: {
+				bgcolor: combineRgb(...companionDisabledFill),
+				color: combineRgb(...companionDisabledText),
+			},
+			callback: (feedback) => {
+				return state.isRundownRowSkipped(Number(feedback.options.rowIndex))
+			},
+		},
+
+		planItemSkipped: {
+			type: 'boolean',
+			name: 'Plan Item Is Skipped',
+			description: 'True while this item is skipped for the live event time (or in rehearsal, for rehearsal).',
+			options: [
+				{
+					type: 'dropdown',
+					id: 'itemId',
+					label: 'Plan Item (blank = the live item)',
+					choices: planItemChoices,
+					default: '',
+					allowCustom: true,
+				},
+			],
+			defaultStyle: {
+				bgcolor: combineRgb(...companionDisabledFill),
+				color: combineRgb(...companionDisabledText),
+			},
+			callback: (feedback) => {
+				const itemId = optString(feedback.options.itemId) || state.timer?.item.id
+				return itemId ? state.isItemSkipped(itemId) : false
+			},
+		},
+
+		rehearsalMode: {
+			type: 'boolean',
+			name: 'Rehearsal Mode On',
+			options: [],
+			defaultStyle: {
+				bgcolor: combineRgb(...cueStandby),
+				color: combineRgb(...cueDarkText),
+			},
+			callback: () => {
+				return state.isRehearsalMode
+			},
+		},
+
+		clockFormatIs: {
+			type: 'boolean',
+			name: 'Clock Format Is',
+			description: "True while the Producer's clock format matches. False on a Producer older than 1.7.0.",
+			options: [
+				{
+					type: 'dropdown',
+					id: 'format',
+					label: 'Clock format',
+					choices: CLOCK_FORMATS,
+					default: 'twentyFourHour',
+				},
+			],
+			defaultStyle: {
+				bgcolor: combineRgb(...companionInfo),
+				color: combineRgb(...cueLightText),
+			},
+			callback: (feedback) => {
+				return state.clockFormat === optString(feedback.options.format)
 			},
 		},
 

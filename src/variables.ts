@@ -1,6 +1,25 @@
 import type { CompanionVariableDefinition, CompanionVariableValues } from '@companion-module/base'
 import { MAX_INDEXED_ROLES, RUNDOWN_ROWS, type ModuleState } from './state.js'
-import { CUE_STATE_LABELS } from './types.js'
+import { CUE_STATE_LABELS, type PCOTimerItem } from './types.js'
+import {
+	itemArrangementText,
+	itemBpmText,
+	itemKeyText,
+	itemLeaderText,
+	itemMeterText,
+	itemMusicLine,
+	itemSequenceText,
+} from './itemDetails.js'
+
+const ITEM_DETAIL_VARIABLES: { suffix: string; name: string; value: (item: PCOTimerItem | undefined) => string }[] = [
+	{ suffix: 'key', name: 'key', value: itemKeyText },
+	{ suffix: 'bpm', name: 'BPM', value: itemBpmText },
+	{ suffix: 'meter', name: 'meter', value: itemMeterText },
+	{ suffix: 'arrangement', name: 'arrangement', value: itemArrangementText },
+	{ suffix: 'sequence', name: 'sequence (short)', value: itemSequenceText },
+	{ suffix: 'leader', name: 'leader first names', value: itemLeaderText },
+	{ suffix: 'music', name: 'key · BPM · meter', value: itemMusicLine },
+]
 
 export function getVariableDefinitions(state: ModuleState): CompanionVariableDefinition[] {
 	const definitions: CompanionVariableDefinition[] = [
@@ -23,6 +42,8 @@ export function getVariableDefinitions(state: ModuleState): CompanionVariableDef
 		{ variableId: 'producer_utc_offset_seconds', name: "Producer's UTC Offset (seconds)" },
 		{ variableId: 'app_mode', name: 'App Mode' },
 		{ variableId: 'settings_hour_format_threshold', name: 'HH:MM:SS Formatting Threshold' },
+		{ variableId: 'settings_clock_format', name: 'Clock Format (twelveHour / twentyFourHour)' },
+		{ variableId: 'producer_clock', name: "Producer's Local Time In Its Clock Format (2:30 PM or 14:30)" },
 
 		{ variableId: 'plan_title', name: 'Plan Title' },
 		{ variableId: 'plan_item_count', name: 'Plan Item Count' },
@@ -46,11 +67,21 @@ export function getVariableDefinitions(state: ModuleState): CompanionVariableDef
 		{ variableId: 'next_item_title', name: 'Next Item Title' },
 		{ variableId: 'next_item_type', name: 'Next Item Type' },
 		{ variableId: 'next_item_length', name: 'Next Item Length' },
+		{ variableId: 'next_item_starts_at', name: 'Next Item Projected Start (when a role shows start times)' },
+		{ variableId: 'item_ends_at_clock', name: 'Active Item Ends At, In The Clock Format' },
 		{ variableId: 'active_item_progress_pct', name: 'Active Item Progress (0-100)' },
 
 		{ variableId: 'projected_end_time', name: 'Projected End Time (local HH:MM)' },
 		{ variableId: 'service_remaining_total', name: 'Service Time Remaining (live item + everything after)' },
 		{ variableId: 'service_over_under', name: 'Service Over/Under vs. Next Schedule (+ is over)' },
+		{ variableId: 'projected_end_clock', name: 'Projected End Time, In The Clock Format' },
+
+		{ variableId: 'rehearsal_mode', name: 'Rehearsal Mode On' },
+		{ variableId: 'rehearsal_time', name: 'Rehearsal Time (name or start)' },
+		{ variableId: 'skipped_count', name: 'Skipped Items (live event time, or rehearsal)' },
+		{ variableId: 'actuals_logging', name: 'Actuals Are Being Recorded' },
+		{ variableId: 'actuals_count', name: 'Items With A Finished Actual (live event time)' },
+		{ variableId: 'actual_over_under', name: 'Finished Items: Actual vs. Planned (+ is over)' },
 
 		{ variableId: 'rundown_page', name: 'Rundown Page (1-based)' },
 		{ variableId: 'rundown_page_count', name: 'Rundown Page Count' },
@@ -90,6 +121,13 @@ export function getVariableDefinitions(state: ModuleState): CompanionVariableDef
 		{ variableId: 'event_time_next', name: 'Next Event Time' },
 		{ variableId: 'event_time_count', name: 'Event Time Count' },
 	]
+
+	for (const which of ['active', 'next'] as const) {
+		const label = which === 'active' ? 'Active Item' : 'Next Item'
+		for (const detail of ITEM_DETAIL_VARIABLES) {
+			definitions.push({ variableId: `${which}_item_${detail.suffix}`, name: `${label} — ${detail.name}` })
+		}
+	}
 
 	for (let row = 1; row <= RUNDOWN_ROWS; row++) {
 		definitions.push(
@@ -155,6 +193,8 @@ export function getVariableValues(state: ModuleState): CompanionVariableValues {
 		producer_utc_offset_seconds: state.producerUtcOffsetSeconds ?? '',
 		app_mode: state.snapshot?.appMode ?? '',
 		settings_hour_format_threshold: state.settings?.hourFormatThreshold ?? '',
+		settings_clock_format: state.clockFormat ?? '',
+		producer_clock: state.producerClockText,
 
 		plan_title: state.plan?.title ?? '',
 		plan_item_count: state.plan?.items.length ?? 0,
@@ -175,15 +215,25 @@ export function getVariableValues(state: ModuleState): CompanionVariableValues {
 		active_item_is_overtime: state.timerIsOvertime ? 'yes' : 'no',
 		active_item_is_running: state.timer?.isRunning ? 'yes' : 'no',
 		active_item_duration_type: state.timer?.isDurationActualForDisplay ? 'Actual' : 'Projected',
-		next_item_title: state.nextPlanItem()?.title ?? '',
-		next_item_type: state.nextPlanItem()?.itemType ?? '',
+		next_item_title: nextItem?.title ?? '',
+		next_item_type: nextItem?.itemType ?? '',
 		next_item_length: nextItem ? state.formatSeconds(nextItem.lengthInSeconds) : '',
+		next_item_starts_at: nextItem ? state.nextItemStartsAtText : '',
+		item_ends_at_clock: state.itemEndsAtClockText,
 		active_item_progress_pct: state.activeItemProgressPct,
 
 		projected_end_time: state.projectedEndText,
 		service_remaining_total:
 			state.serviceRemainingSeconds === null ? '' : state.formatSeconds(state.serviceRemainingSeconds),
 		service_over_under: state.serviceOverUnderText,
+		projected_end_clock: state.projectedEndClockText,
+
+		rehearsal_mode: state.isRehearsalMode ? 'yes' : 'no',
+		rehearsal_time: state.rehearsalTime ? state.planTimeLabel(state.rehearsalTime) : '',
+		skipped_count: state.skippedItemIds.length,
+		actuals_logging: state.isLoggingActuals ? 'yes' : 'no',
+		actuals_count: state.completedActuals.length,
+		actual_over_under: state.actualOverUnderText,
 
 		rundown_page: state.rundownPageIndex + 1,
 		rundown_page_count: state.rundownPageCount,
@@ -226,6 +276,12 @@ export function getVariableValues(state: ModuleState): CompanionVariableValues {
 		event_time_live: state.liveEventTime?.displayName ?? '',
 		event_time_next: state.nextEventTime?.displayName ?? '',
 		event_time_count: state.eventTimeEntries.length,
+	}
+
+	const activeItem = state.timer?.item
+	for (const detail of ITEM_DETAIL_VARIABLES) {
+		values[`active_item_${detail.suffix}`] = detail.value(activeItem)
+		values[`next_item_${detail.suffix}`] = detail.value(nextItem)
 	}
 
 	for (let row = 1; row <= RUNDOWN_ROWS; row++) {
