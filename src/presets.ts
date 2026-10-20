@@ -427,8 +427,18 @@ export function getPresetDefinitions(
 		steps: [{ down: [], up: [] }],
 	}
 
-	const signFeedback = (sign: '+' | '-', glyph: string) => [
+	const keyFace = (glyph: string, label: string) =>
+		USE_GLYPH_KEY_FACES ? { png64: TIMER_ENTRY_GLYPHS[glyph] } : { text: label }
+	const litKey = (color: number, glyph: string, label: string) =>
+		USE_GLYPH_KEY_FACES ? lit(color, glyph) : { bgcolor: color, color: INK_DARK, text: label }
+	const signFeedback = (sign: '+' | '-', glyph: string, meridiem: 'am' | 'pm'): PresetFeedback[] => [
 		{ feedbackId: 'timerEntrySignIs', options: { sign }, style: lit(BLUE, glyph) },
+		{ feedbackId: 'timerEntryEndAt', options: {}, style: keyFace(meridiem, meridiem.toUpperCase()) },
+		{
+			feedbackId: 'timerEntryMeridiemIs',
+			options: { meridiem },
+			style: litKey(BLUE, meridiem, meridiem.toUpperCase()),
+		},
 	]
 	entryKey(
 		'clear',
@@ -449,8 +459,11 @@ export function getPresetDefinitions(
 		'R2C4',
 		'minus',
 		'−',
-		[{ actionId: 'timerEntrySign', options: { sign: '-' } }],
-		signFeedback('-', 'minus'),
+		[
+			{ actionId: 'timerEntrySign', options: { sign: '-' } },
+			{ actionId: 'timerEntryMeridiem', options: { meridiem: 'am' } },
+		],
+		signFeedback('-', 'minus', 'am'),
 	)
 	entryKey('4', 'R3C1', '4', '4', entryAppend('4'))
 	entryKey('5', 'R3C2', '5', '5', entryAppend('5'))
@@ -460,8 +473,11 @@ export function getPresetDefinitions(
 		'R3C4',
 		'plus',
 		'+',
-		[{ actionId: 'timerEntrySign', options: { sign: '+' } }],
-		signFeedback('+', 'plus'),
+		[
+			{ actionId: 'timerEntrySign', options: { sign: '+' } },
+			{ actionId: 'timerEntryMeridiem', options: { meridiem: 'pm' } },
+		],
+		signFeedback('+', 'plus', 'pm'),
 	)
 	entryKey('1', 'R4C1', '1', '1', entryAppend('1'))
 	entryKey('2', 'R4C2', '2', '2', entryAppend('2'))
@@ -483,6 +499,14 @@ export function getPresetDefinitions(
 		'⌫',
 		[{ actionId: 'timerEntryBackspace', options: {} }],
 		[{ feedbackId: 'timerEntryInProgress', options: {}, style: lit(AMBER, 'backspace') }],
+	)
+	entryKey(
+		'end_at',
+		'R5C4',
+		'endAt',
+		'End @',
+		[{ actionId: 'timerEntryEndAt', options: { mode: 'toggle' } }],
+		[{ feedbackId: 'timerEntryEndAt', options: {}, style: litKey(BLUE, 'endAt', 'End @') }],
 	)
 
 	const firstWaypoint = state.waypointChoices()[0]?.id ?? ''

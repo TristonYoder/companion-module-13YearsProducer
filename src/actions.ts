@@ -17,7 +17,7 @@ import {
 	type PlanItemUpdateBody,
 	type RoleUpdateBody,
 } from './types.js'
-import { lengthFromOption, normalizeClockTime } from './timerEntry.js'
+import { endAtTimeText, lengthFromOption, normalizeClockTime } from './timerEntry.js'
 import type { TimerEntrySign } from './timerEntry.js'
 
 export interface ActionDeps {
@@ -68,6 +68,7 @@ function explainWaypointFailure(err: ApiError): string | undefined {
 }
 
 const NEEDS_1_7 = 'needs 13 Years 1.7.0 or later on the Producer'
+const NEEDS_1_6 = 'needs 13 Years 1.6.0 or later on the Producer'
 
 function explainUnknownRoute(feature: string, more?: (err: ApiError) => string | undefined) {
 	return (err: ApiError): string | undefined => {
@@ -336,6 +337,55 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 			}, deps),
 		},
 
+		timerEntryEndAt: {
+			name: 'Timer Entry: End @ Mode',
+			description:
+				'Switches the keypad to End @: type a clock time (24-hour, or pick AM/PM) and Enter makes the live item end then, the next time that time comes round. Switching either way empties the entry.',
+			options: [
+				{
+					type: 'dropdown',
+					id: 'mode',
+					label: 'End @',
+					choices: [
+						{ id: 'toggle', label: 'Toggle' },
+						{ id: 'on', label: 'On' },
+						{ id: 'off', label: 'Off' },
+					],
+					default: 'toggle',
+				},
+			],
+			callback: guarded(async (action) => {
+				const mode = optString(action.options.mode)
+				const on = mode === 'on' ? true : mode === 'off' ? false : !deps.state.timerEntryEndAt
+				deps.state.setTimerEntryEndAt(on)
+				deps.refresh()
+			}, deps),
+		},
+
+		timerEntryMeridiem: {
+			name: 'Timer Entry: AM/PM (End @)',
+			description:
+				'In End @ mode, reads the typed time as AM or PM; pressing the one already picked goes back to 24-hour. Does nothing outside End @, so it can share a key with a sign.',
+			options: [
+				{
+					type: 'dropdown',
+					id: 'meridiem',
+					label: 'AM/PM',
+					choices: [
+						{ id: 'am', label: 'AM' },
+						{ id: 'pm', label: 'PM' },
+					],
+					default: 'am',
+				},
+			],
+			callback: guarded(async (action) => {
+				const meridiem = optString(action.options.meridiem)
+				if (meridiem !== 'am' && meridiem !== 'pm') return
+				deps.state.setTimerEntryMeridiem(meridiem)
+				deps.refresh()
+			}, deps),
+		},
+
 		timerEntryBackspace: {
 			name: 'Timer Entry: Backspace',
 			options: [],
@@ -357,17 +407,27 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 		timerEntryCommit: {
 			name: 'Timer Entry: Enter (Commit)',
 			options: [],
-			callback: guarded(async () => {
-				const input = deps.state.timerEntryBuffer
-				if (!deps.state.timerEntryAction) {
-					deps.state.clearTimerEntry()
+			callback: guarded(
+				async () => {
+					const input = deps.state.timerEntryBuffer
+					const entry = deps.state.timerEntryAction
+					if (!entry) {
+						deps.state.resetTimerEntry()
+						deps.refresh()
+						return
+					}
+					if (entry.kind === 'endAt') await deps.api.timerEndAt(endAtTimeText(entry))
+					else await deps.api.timerSetRemaining({ input })
+					deps.state.resetTimerEntry()
 					deps.refresh()
-					return
-				}
-				await deps.api.timerSetRemaining({ input })
-				deps.state.clearTimerEntry()
-				deps.refresh()
-			}, deps),
+				},
+				deps,
+				(err) => {
+					if (!deps.state.timerEntryEndAt) return undefined
+					if (err.status === 404 && err.message === 'Unknown path') return `End @ ${NEEDS_1_6}.`
+					return err.status === 409 ? 'There is no active item to set an end time on.' : undefined
+				},
+			),
 		},
 
 		timerEndAt: {
@@ -394,7 +454,10 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 					await deps.api.timerEndAt(time)
 				},
 				deps,
-				(err) => (err.status === 409 ? 'There is no active item to set an end time on.' : undefined),
+				(err) => {
+					if (err.status === 404 && err.message === 'Unknown path') return `Timer: End At ${NEEDS_1_6}.`
+					return err.status === 409 ? 'There is no active item to set an end time on.' : undefined
+				},
 			),
 		},
 

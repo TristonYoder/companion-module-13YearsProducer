@@ -302,7 +302,7 @@ describe('preset config gating', () => {
 
 	test('the new preset packs exist', () => {
 		const presets = getPresetDefinitions(new ModuleState())
-		assert.equal(Object.values(presets).filter((p) => p.category === 'Timer Entry').length, 20)
+		assert.equal(Object.values(presets).filter((p) => p.category === 'Timer Entry').length, 21)
 		assert.equal(Object.keys(presets).filter((id) => id.startsWith('rundown_row_')).length, 8)
 		for (const id of [
 			'timer_plus_10',

@@ -1,6 +1,16 @@
 import { ClockSync, anchorElapsedMs, anchorElapsedSeconds, anchorRemainingSeconds, monotonicEpochNow } from './sync.js'
-import { formatDuration, parseTimerInput, previewText, resolvedSeconds, signOf, withSign } from './timerEntry.js'
-import type { TimerEntrySign, TimerInputAction } from './timerEntry.js'
+import {
+	endAtPreviewText,
+	formatDuration,
+	parseEndAt,
+	parseTimerInput,
+	previewText,
+	resolvedSeconds,
+	secondsUntilClockTime,
+	signOf,
+	withSign,
+} from './timerEntry.js'
+import type { Meridiem, TimerEntrySign, TimerInputAction } from './timerEntry.js'
 import { isHeaderItem } from './itemDetails.js'
 import { isClockFormat } from './types.js'
 import type {
@@ -118,6 +128,8 @@ export class ModuleState {
 	isSocketConnected = false
 	lastMessage: InterTeamMessage | null = null
 	timerEntryBuffer = ''
+	timerEntryEndAt = false
+	timerEntryMeridiem: Meridiem | null = null
 	rev: number | null = null
 	epoch: number | null = null
 	onEpochChange?: (needsState: boolean) => void
@@ -642,11 +654,35 @@ export class ModuleState {
 	}
 
 	appendTimerEntry(text: string): void {
+		if (this.timerEntryEndAt && !/^[0-9:]*$/.test(text)) return
 		this.timerEntryBuffer += text
 	}
 
 	setTimerEntrySign(sign: TimerEntrySign): void {
+		if (this.timerEntryEndAt) return
 		this.timerEntryBuffer = withSign(this.timerEntryBuffer, sign)
+	}
+
+	setTimerEntryEndAt(on: boolean): void {
+		if (on === this.timerEntryEndAt) return
+		this.timerEntryEndAt = on
+		this.timerEntryBuffer = ''
+		this.timerEntryMeridiem = null
+	}
+
+	setTimerEntryMeridiem(meridiem: Meridiem): void {
+		if (!this.timerEntryEndAt) return
+		this.timerEntryMeridiem = this.timerEntryMeridiem === meridiem ? null : meridiem
+	}
+
+	resetTimerEntry(): void {
+		this.timerEntryBuffer = ''
+		this.timerEntryEndAt = false
+		this.timerEntryMeridiem = null
+	}
+
+	get localUtcOffsetSeconds(): number {
+		return this.producerUtcOffsetSeconds ?? -new Date(this.nowMs).getTimezoneOffset() * 60
 	}
 
 	backspaceTimerEntry(): void {
@@ -658,15 +694,29 @@ export class ModuleState {
 	}
 
 	get timerEntryAction(): TimerInputAction | null {
+		if (this.timerEntryEndAt) {
+			return this.timerEntryBuffer ? parseEndAt(this.timerEntryBuffer, this.timerEntryMeridiem) : null
+		}
 		return parseTimerInput(this.timerEntryBuffer)
 	}
 
 	get timerEntrySign(): TimerEntrySign | null {
+		if (this.timerEntryEndAt) return null
 		return signOf(this.timerEntryBuffer)
 	}
 
 	get timerEntryPreview(): string {
 		const threshold = this.settings?.hourFormatThreshold ?? DEFAULT_HOUR_FORMAT_THRESHOLD
+		if (this.timerEntryEndAt) {
+			const action = this.timerEntryAction
+			if (!action || action.kind !== 'endAt') return 'End @'
+			const remaining = secondsUntilClockTime(action.hour, action.minute, this.nowMs, this.localUtcOffsetSeconds)
+			return endAtPreviewText(
+				formatClockParts(action.hour, action.minute, null, this.clockFormat),
+				remaining,
+				threshold,
+			)
+		}
 		const timer = this.timer
 		return previewText(
 			this.timerEntryBuffer,
@@ -679,6 +729,9 @@ export class ModuleState {
 	get timerEntryResultSeconds(): number | null {
 		const action = this.timerEntryAction
 		if (!action) return null
+		if (action.kind === 'endAt') {
+			return secondsUntilClockTime(action.hour, action.minute, this.nowMs, this.localUtcOffsetSeconds)
+		}
 		const timer = this.timer
 		if (action.kind === 'adjustRelative' && !timer) return null
 		const seconds = resolvedSeconds(

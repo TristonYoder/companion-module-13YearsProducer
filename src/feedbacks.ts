@@ -387,6 +387,45 @@ export function getFeedbackDefinitions(state: ModuleState): CompanionFeedbackDef
 			},
 		},
 
+		timerEntryEndAt: {
+			type: 'boolean',
+			name: 'Timer Entry In End @ Mode',
+			description: 'True while the keypad is taking a clock time to end the live item at.',
+			options: [],
+			defaultStyle: {
+				bgcolor: combineRgb(...companionInfo),
+				color: combineRgb(...cueLightText),
+			},
+			callback: () => {
+				return state.timerEntryEndAt
+			},
+		},
+
+		timerEntryMeridiemIs: {
+			type: 'boolean',
+			name: 'Timer Entry AM/PM Is',
+			description: 'True in End @ mode while the typed time is read as AM (or PM).',
+			options: [
+				{
+					type: 'dropdown',
+					id: 'meridiem',
+					label: 'AM/PM',
+					choices: [
+						{ id: 'am', label: 'AM' },
+						{ id: 'pm', label: 'PM' },
+					],
+					default: 'am',
+				},
+			],
+			defaultStyle: {
+				bgcolor: combineRgb(...companionInfo),
+				color: combineRgb(...cueLightText),
+			},
+			callback: (feedback) => {
+				return state.timerEntryEndAt && state.timerEntryMeridiem === optString(feedback.options.meridiem)
+			},
+		},
+
 		pcoConnected: {
 			type: 'boolean',
 			name: 'Planning Center Connected',

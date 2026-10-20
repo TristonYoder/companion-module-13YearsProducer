@@ -90,6 +90,7 @@ export function getVariableDefinitions(state: ModuleState): CompanionVariableDef
 		{ variableId: 'timer_entry_preview', name: 'Timer Entry Preview (what committing it would read)' },
 		{ variableId: 'timer_entry_result', name: 'Timer Entry Result (resulting remaining time, e.g. 03:00)' },
 		{ variableId: 'timer_entry_result_seconds', name: 'Timer Entry Result in Seconds' },
+		{ variableId: 'timer_entry_end_at', name: 'Timer Entry Is In End @ Mode' },
 
 		{ variableId: 'selected_role_names', name: 'Selected Role Names' },
 		{ variableId: 'role_count', name: 'Role Count' },
@@ -243,6 +244,7 @@ export function getVariableValues(state: ModuleState): CompanionVariableValues {
 		timer_entry_result:
 			state.timerEntryResultSeconds === null ? '' : state.formatSeconds(state.timerEntryResultSeconds),
 		timer_entry_result_seconds: state.timerEntryResultSeconds ?? '',
+		timer_entry_end_at: state.timerEntryEndAt ? 'yes' : 'no',
 
 		selected_role_names: state.selectedRoleIds
 			.map((id) => state.roleById(id)?.name)

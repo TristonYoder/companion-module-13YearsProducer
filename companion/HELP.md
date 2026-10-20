@@ -45,6 +45,8 @@ Once connected, this module holds a WebSocket open to the app for as long as the
 
 - **Timer Entry: Append Key** — type a digit, `h`, `m`, `s`, or `:` into the entry buffer. The dropdown also takes custom text, so one button can type a whole fragment like `30s`
 - **Timer Entry: Sign (+/−)** — put a `+` or `−` on the front of the buffer, making the entry relative to the current remaining time. Pressing the sign that's already set removes it; the other one replaces it
+- **Timer Entry: End @ Mode** — toggle (or turn on/off) the keypad's End @ mode, as in the app's time-entry popover: type a clock time and Enter ends the live item then, the next time that time comes round (a time already passed today means tomorrow). Digits up to two are the hour (`7` is 07:00), the last two of three or four digits are the minutes (`930`, `1430`), or use `:`. Without AM/PM the hour is 24-hour; with AM/PM it must be 1-12. Switching End @ either way empties the entry, the `h`/`m`/`s` and sign keys do nothing while it is on, and Enter sends `HH:mm` to **Timer: End At** and leaves End @ (on failure, what was typed is kept). Needs 13 Years 1.6.0 or later
+- **Timer Entry: AM/PM (End @)** — read the End @ time as AM or PM; pressing the one already picked goes back to 24-hour. Does nothing outside End @, which is how the `−` and `+` keys double as AM and PM
 - **Timer Entry: Backspace** — drop the last character
 - **Timer Entry: Clear** — empty the buffer
 - **Timer Entry: Enter (Commit)** — send what's typed. The raw text goes to the app, which parses it with the same parser its own time field uses; an empty or half-typed buffer sends nothing. The buffer clears after a press, except when the send itself fails (no plan loaded, no active item) — then what was typed is kept for a second try
@@ -124,6 +126,7 @@ Once connected, this module holds a WebSocket open to the app for as long as the
 - **Timer Entry Is Committable** — true once what's typed on the keypad actually parses to something the app can act on; this is what lights the Enter key
 - **Timer Entry Sign Is** — true while the buffer carries a specific sign, so the active `+`/`−` key reads as engaged
 - **Timer Entry In Progress** — true whenever anything is typed, for the C and Backspace keys
+- **Timer Entry In End @ Mode** / **Timer Entry AM/PM Is** — light the End @ key, and turn the `−`/`+` keys into AM/PM
 - **Connection Lost** — true whenever the control socket isn't currently open
 - **Connection Stale** — true while the socket looks open but no data has arrived for more than 8 seconds (5 seconds on sync protocol v2)
 - **Role Is Selected** — true while a role is one of the app's selected roles
@@ -149,7 +152,7 @@ Once connected, this module holds a WebSocket open to the app for as long as the
 - `active_item_title`, `active_item_type`, `active_item_service_plan_title`
 - `active_item_remaining` (formatted like the app's own screen, e.g. `1:35:00`; counted locally from the timer anchor on sync protocol v2, otherwise the pushed string), `active_item_remaining_seconds`, `active_item_is_overtime`, `active_item_is_running`
 - `active_item_elapsed`, `active_item_length` (both `m:ss`), `active_item_overtime_text` (`+1:12`, blank when not over), `item_ends_at` (local `HH:MM:SS` the running item reaches zero; blank when paused or over)
-- `timer_entry_buffer` — what the Timer Entry keypad has typed so far; `timer_entry_preview` — what the active item would read as if it were committed, in the app's own format. A relative entry previews the amount first and where it lands second (`+00:30` over `= 04:30`), since `04:30` on its own looks the same whether it came from `430` or from `+30s`. Both are blank when nothing is typed, the way the app's popover leaves its preview line blank rather than showing an error
+- `timer_entry_buffer` — what the Timer Entry keypad has typed so far; `timer_entry_preview` — what the active item would read as if it were committed, in the app's own format. A relative entry previews the amount first and where it lands second (`+00:30` over `= 04:30`), since `04:30` on its own looks the same whether it came from `430` or from `+30s`. Both are blank when nothing is typed, the way the app's popover leaves its preview line blank rather than showing an error. In End @ mode the preview reads `End @ 2:30 PM` over `→ 1:30:00 remaining` (the target in the Producer's clock format, then the time left until it), `timer_entry_result` is that remaining time, and `timer_entry_end_at` is `yes`
 - `next_item_title`, `next_item_type`, `next_item_length` — the next item the app will go to, passing over headers and skipped items; `next_item_starts_at` — its projected start in the clock format, only while some role's pagers show start times
 - `active_item_key`, `active_item_bpm`, `active_item_meter`, `active_item_arrangement`, `active_item_sequence` (short, e.g. `V1 C V2 C B C`), `active_item_leader` (`Sam`, `Sam & Pat`, `Sam + 2`) and `active_item_music` (`G · 72 BPM · 4/4`), and the same seven as `next_item_…` — the item's Planning Center details, blank for items without them (manual items, headers, or a Producer older than 1.7.0)
 - `active_item_progress_pct` — elapsed over length, whole percent 0-100
@@ -184,10 +187,12 @@ R1    C  h  m  s
 R2    7  8  9  −
 R3    4  5  6  +
 R4    1  2  3  ↵
-R5    0  :  ⌫
+R5    0  :  ⌫  End @
 ```
 
 Type a time the way you would in the app — `4350` or `43:50` for 43:50, `2m3s` for 2:03, `1h30m` for 1:30:00 — or lead with `+`/`−` to adjust the running time instead of setting it (`+30s`, `-5m`). The screen previews before you commit: an absolute entry shows what the timer will read, a relative one shows the amount being added or taken off and where that lands. Enter lights green once what's typed is actually valid, Clear and Backspace light amber while there's something to undo, and the active sign key stays lit while the entry is relative — every lit key keeps its face, in dark ink. Enter sends the raw text to the app, which parses it itself, so the pad and the producer's own keyboard always agree about what an entry means.
+
+**End @** works like the app's End @ button: press it and the screen reads `End @`; type a clock time (`930`, `14:30`) and the `−` and `+` keys turn into **AM** and **PM** (lit while picked; leave both off for 24-hour). The screen previews the target in the Producer's 12- or 24-hour format and how long that leaves, Enter lights once the time is valid and makes the live item end then (tomorrow if that time has passed today), and the pad returns to normal entry. Press End @ again to leave without sending.
 
 In the app the Enter key is double-tall and `0` is double-wide; Companion buttons can't span cells, so both are ordinary buttons here, and Backspace (keyboard-only in the app) takes the spare cell. The key faces are pre-rendered in Inter — slashed zero included — to match the app's own screen and the pagers rather than Companion's default font.
 
