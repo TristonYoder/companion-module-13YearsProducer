@@ -216,7 +216,7 @@ export function getPresetDefinitions(
 
 	presets['plan_previous'] = {
 		type: 'button',
-		category: 'Service Navigation',
+		category: 'Event Navigation',
 		name: 'Previous Item',
 		style: face({ icon: 'planPrevious', label: 'Prev Item', color: BLUE }),
 		feedbacks: [{ feedbackId: 'atStartOfPlan', options: {}, style: bg(GREY) }],
@@ -225,7 +225,7 @@ export function getPresetDefinitions(
 
 	presets['plan_next'] = {
 		type: 'button',
-		category: 'Service Navigation',
+		category: 'Event Navigation',
 		name: 'Next Item',
 		style: face({ icon: 'planNext', label: 'Next Item', color: BLUE }),
 		feedbacks: [
@@ -240,7 +240,7 @@ export function getPresetDefinitions(
 
 	presets['plan_next_service'] = {
 		type: 'button',
-		category: 'Service Navigation',
+		category: 'Event Navigation',
 		name: 'Load Next Service',
 		style: face({ icon: 'planNextService', label: 'Next Service', color: PURPLE }),
 		feedbacks: [],
@@ -249,7 +249,7 @@ export function getPresetDefinitions(
 
 	presets['active_item_status'] = {
 		type: 'button',
-		category: 'Service Navigation',
+		category: 'Event Navigation',
 		name: 'Active Item & Time Remaining',
 		style: face({
 			label: '$(13yearsproducer:active_item_title)\\n$(13yearsproducer:active_item_remaining)',
@@ -265,7 +265,7 @@ export function getPresetDefinitions(
 
 	presets['plan_next_hold'] = {
 		type: 'button',
-		category: 'Service Navigation',
+		category: 'Event Navigation',
 		name: 'Next Item (Hold Clock)',
 		style: face({ icon: 'planNext', label: 'Next (Hold)', color: AMBER }),
 		feedbacks: [{ feedbackId: 'atEndOfPlan', options: {}, style: bg(GREY) }],
@@ -274,7 +274,7 @@ export function getPresetDefinitions(
 
 	presets['countdown_stages'] = {
 		type: 'button',
-		category: 'Service Navigation',
+		category: 'Event Navigation',
 		name: 'Countdown (amber at 60s, red at 30s)',
 		style: face({
 			label: '$(13yearsproducer:active_item_title)\\n$(13yearsproducer:active_item_remaining)',
@@ -302,13 +302,13 @@ export function getPresetDefinitions(
 		},
 		{
 			id: 'service_remaining',
-			name: 'Service Time Remaining',
+			name: 'Event Time Remaining',
 			label: 'Left\\n$(13yearsproducer:service_remaining_total)',
 			icon: 'stopwatch',
 		},
 		{
 			id: 'service_over_under',
-			name: 'Service Over/Under (needs a schedule)',
+			name: 'Event Over/Under (needs a schedule)',
 			label: 'Over/Under\\n$(13yearsproducer:service_over_under)',
 			icon: 'schedule',
 		},
@@ -322,7 +322,7 @@ export function getPresetDefinitions(
 	for (const t of timingStatus) {
 		presets[`timing_${t.id}`] = {
 			type: 'button',
-			category: 'Service Timing',
+			category: 'Event Timing',
 			name: t.name,
 			style: face({ icon: t.icon, label: t.label, color: DARK, size: 'auto' }),
 			feedbacks: [],
@@ -332,7 +332,7 @@ export function getPresetDefinitions(
 
 	presets['timing_progress'] = {
 		type: 'button',
-		category: 'Service Timing',
+		category: 'Event Timing',
 		name: 'Live Item Progress',
 		style: {
 			text: '$(13yearsproducer:active_item_progress_pct)%',
@@ -583,7 +583,7 @@ export function getPresetDefinitions(
 
 	presets['schedule_go_live_next'] = {
 		type: 'button',
-		category: 'Service Schedules',
+		category: 'Event Schedules',
 		name: 'Bring Next Schedule Live',
 		style: face({ icon: 'scheduleGoLive', label: 'Go Live Now', color: GREEN }),
 		feedbacks: [
@@ -599,7 +599,7 @@ export function getPresetDefinitions(
 
 	presets['schedule_go_live'] = {
 		type: 'button',
-		category: 'Service Schedules',
+		category: 'Event Schedules',
 		name: 'Bring A Specific Schedule Live',
 		style: face({ icon: 'schedule', label: 'Go Live', color: GREEN }),
 		feedbacks: [
@@ -615,8 +615,8 @@ export function getPresetDefinitions(
 
 	presets['next_schedule_status'] = {
 		type: 'button',
-		category: 'Service Schedules',
-		name: 'Next Service (status)',
+		category: 'Event Schedules',
+		name: 'Next Scheduled Event (status)',
 		style: face({ icon: 'schedule', label: '$(13yearsproducer:next_schedule_title)', color: DARK, size: 'auto' }),
 		feedbacks: [{ feedbackId: 'hasUpcomingSchedule', options: {}, style: bg(BLUE) }],
 		steps: [{ down: [], up: [] }],

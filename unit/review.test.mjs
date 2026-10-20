@@ -109,7 +109,7 @@ describe('definition signature', () => {
 	})
 })
 
-describe('service timing', () => {
+describe('event timing', () => {
 	const NOW = Date.UTC(2026, 0, 1, 12, 0, 0)
 
 	function loaded(schedules) {

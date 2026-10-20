@@ -1282,7 +1282,7 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 		waypointGo: {
 			name: 'Go To Waypoint',
 			description:
-				'Jumps the service to whichever item carries this waypoint. Warns rather than fails silently when the waypoint is unassigned in this week\u2019s plan.',
+				'Jumps the event to whichever item carries this waypoint. Warns rather than fails silently when the waypoint is unassigned in this week\u2019s plan.',
 			options: [
 				{
 					type: 'dropdown',
@@ -1481,7 +1481,7 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 		scheduleCreate: {
 			name: 'Create Schedule',
 			description:
-				'Adds a service schedule. Start time is ISO-8601 (2026-10-18T10:00:00-04:00); without an offset it is read as this machine\u2019s local time.',
+				'Adds an event schedule. Start time is ISO-8601 (2026-10-18T10:00:00-04:00); without an offset it is read as this machine\u2019s local time.',
 			options: [
 				{ type: 'textinput', id: 'title', label: 'Title', default: '', useVariables: true },
 				{
@@ -1690,7 +1690,7 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 
 		scheduleGoLive: {
 			name: 'Bring Schedule Live Now',
-			description: 'Loads a scheduled service immediately rather than waiting for its go-live time.',
+			description: 'Loads a scheduled event immediately rather than waiting for its go-live time.',
 			options: [
 				{
 					type: 'dropdown',
@@ -1708,7 +1708,7 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 
 		scheduleGoLiveNext: {
 			name: 'Bring Next Schedule Live Now',
-			description: 'Whichever service the app says is next — no dropdown to keep current as schedules come and go.',
+			description: 'Whichever event the app says is next — no dropdown to keep current as schedules come and go.',
 			options: [],
 			callback: guarded(async () => {
 				const next = deps.state.nextSchedule
@@ -1747,7 +1747,7 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 
 		scheduleSetOffset: {
 			name: 'Set Schedule Lead Time',
-			description: 'How many minutes before the service start the app brings it up.',
+			description: 'How many minutes before the event start the app brings it up.',
 			options: [
 				{
 					type: 'dropdown',

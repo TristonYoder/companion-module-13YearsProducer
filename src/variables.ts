@@ -72,8 +72,8 @@ export function getVariableDefinitions(state: ModuleState): CompanionVariableDef
 		{ variableId: 'active_item_progress_pct', name: 'Active Item Progress (0-100)' },
 
 		{ variableId: 'projected_end_time', name: 'Projected End Time (local HH:MM)' },
-		{ variableId: 'service_remaining_total', name: 'Service Time Remaining (live item + everything after)' },
-		{ variableId: 'service_over_under', name: 'Service Over/Under vs. Next Schedule (+ is over)' },
+		{ variableId: 'service_remaining_total', name: 'Event Time Remaining (live item + everything after)' },
+		{ variableId: 'service_over_under', name: 'Event Over/Under vs. Next Schedule (+ is over)' },
 		{ variableId: 'projected_end_clock', name: 'Projected End Time, In The Clock Format' },
 
 		{ variableId: 'rehearsal_mode', name: 'Rehearsal Mode On' },
