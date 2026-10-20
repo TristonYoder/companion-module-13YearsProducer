@@ -301,15 +301,15 @@ export function getPresetDefinitions(
 			icon: 'timerClock',
 		},
 		{
-			id: 'service_remaining',
+			id: 'event_remaining',
 			name: 'Event Time Remaining',
-			label: 'Left\\n$(13yearsproducer:service_remaining_total)',
+			label: 'Left\\n$(13yearsproducer:event_remaining_total)',
 			icon: 'stopwatch',
 		},
 		{
-			id: 'service_over_under',
+			id: 'event_over_under',
 			name: 'Event Over/Under (needs a schedule)',
-			label: 'Over/Under\\n$(13yearsproducer:service_over_under)',
+			label: 'Over/Under\\n$(13yearsproducer:event_over_under)',
 			icon: 'schedule',
 		},
 		{

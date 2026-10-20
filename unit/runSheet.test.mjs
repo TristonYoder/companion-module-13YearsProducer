@@ -492,3 +492,31 @@ describe('presets', () => {
 		}
 	})
 })
+
+describe('event-named variables', () => {
+	test('event_ variables and their deprecated service_ aliases carry the same values', () => {
+		const items = [item('a', { lengthInSeconds: 100 }), item('b', { lengthInSeconds: 200 })]
+		const state = stateWith(
+			baseSnapshot({
+				plan: planOf(items),
+				settings: { hourFormatThreshold: 'never' },
+				timer: timerFor(items[0], { remainingSeconds: 100 }),
+			}),
+		)
+		const values = getVariableValues(state)
+		assert.equal(values.event_remaining_total, '05:00')
+		assert.equal(values.service_remaining_total, values.event_remaining_total)
+		assert.equal(values.service_over_under, values.event_over_under)
+		const names = new Map(getVariableDefinitions(state).map((d) => [d.variableId, d.name]))
+		for (const id of ['event_remaining_total', 'event_over_under']) assert.doesNotMatch(names.get(id), /Deprecated/)
+		for (const id of ['service_remaining_total', 'service_over_under']) assert.match(names.get(id), /\(Deprecated\)$/)
+	})
+
+	test('timing presets use the event_ variables', () => {
+		const presets = getPresetDefinitions(stateWith(baseSnapshot()))
+		assert.match(presets.timing_event_remaining.style.text, /event_remaining_total/)
+		assert.match(presets.timing_event_over_under.style.text, /event_over_under/)
+		const text = JSON.stringify(presets)
+		assert.doesNotMatch(text, /service_remaining_total|service_over_under/)
+	})
+})

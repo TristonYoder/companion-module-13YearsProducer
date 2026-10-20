@@ -72,8 +72,10 @@ export function getVariableDefinitions(state: ModuleState): CompanionVariableDef
 		{ variableId: 'active_item_progress_pct', name: 'Active Item Progress (0-100)' },
 
 		{ variableId: 'projected_end_time', name: 'Projected End Time (local HH:MM)' },
-		{ variableId: 'service_remaining_total', name: 'Event Time Remaining (live item + everything after)' },
-		{ variableId: 'service_over_under', name: 'Event Over/Under vs. Next Schedule (+ is over)' },
+		{ variableId: 'event_remaining_total', name: 'Event Time Remaining (live item + everything after)' },
+		{ variableId: 'event_over_under', name: 'Event Over/Under vs. Next Schedule (+ is over)' },
+		{ variableId: 'service_remaining_total', name: 'Event Time Remaining (Deprecated)' },
+		{ variableId: 'service_over_under', name: 'Event Over/Under vs. Next Schedule (Deprecated)' },
 		{ variableId: 'projected_end_clock', name: 'Projected End Time, In The Clock Format' },
 
 		{ variableId: 'rehearsal_mode', name: 'Rehearsal Mode On' },
@@ -173,6 +175,9 @@ export function getVariableValues(state: ModuleState): CompanionVariableValues {
 	const plotiphar = state.plotiphar
 	const nextSchedule = state.nextSchedule
 	const nextItem = state.nextPlanItem()
+	const eventRemaining =
+		state.serviceRemainingSeconds === null ? '' : state.formatSeconds(state.serviceRemainingSeconds)
+	const eventOverUnder = state.serviceOverUnderText
 
 	const values: CompanionVariableValues = {
 		connection_status: state.isSocketConnected ? 'connected' : 'disconnected',
@@ -224,9 +229,10 @@ export function getVariableValues(state: ModuleState): CompanionVariableValues {
 		active_item_progress_pct: state.activeItemProgressPct,
 
 		projected_end_time: state.projectedEndText,
-		service_remaining_total:
-			state.serviceRemainingSeconds === null ? '' : state.formatSeconds(state.serviceRemainingSeconds),
-		service_over_under: state.serviceOverUnderText,
+		event_remaining_total: eventRemaining,
+		event_over_under: eventOverUnder,
+		service_remaining_total: eventRemaining,
+		service_over_under: eventOverUnder,
 		projected_end_clock: state.projectedEndClockText,
 
 		rehearsal_mode: state.isRehearsalMode ? 'yes' : 'no',
