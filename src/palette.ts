@@ -1,0 +1,13 @@
+export type RGB = [number, number, number]
+
+export const cueOff: RGB = [20, 26, 38]
+export const cueStandby: RGB = [245, 184, 38]
+export const cueGo: RGB = [38, 199, 89]
+export const cueLightText: RGB = [255, 255, 255]
+export const cueDarkText: RGB = [26, 26, 26]
+export const timerOvertime: RGB = [204, 23, 23]
+export const companionInfo: RGB = [74, 144, 226]
+export const companionRemote: RGB = [126, 87, 194]
+export const companionDisabledFill: RGB = [72, 72, 78]
+export const companionDisabledText: RGB = [150, 150, 156]
+export const companionNeutral: RGB = [100, 100, 100]

@@ -1,3 +1,5 @@
+import { cueDarkText, cueGo, cueLightText, cueOff, cueStandby, type RGB } from './palette.js'
+
 export type CueStateValue = 'OFF' | 'STANDBY' | 'GO'
 
 export const CUE_STATES: CueStateValue[] = ['OFF', 'STANDBY', 'GO']
@@ -10,16 +12,16 @@ export const CUE_STATE_LABELS: Record<CueStateValue, string> = {
 	GO: 'Go!',
 }
 
-export const CUE_STATE_COLOR: Record<CueStateValue, [number, number, number]> = {
-	OFF: [20, 26, 38],
-	STANDBY: [245, 184, 38],
-	GO: [38, 199, 89],
+export const CUE_STATE_COLOR: Record<CueStateValue, RGB> = {
+	OFF: cueOff,
+	STANDBY: cueStandby,
+	GO: cueGo,
 }
 
-export const CUE_STATE_TEXT_COLOR: Record<CueStateValue, [number, number, number]> = {
-	OFF: [255, 255, 255],
-	STANDBY: [26, 26, 26],
-	GO: [255, 255, 255],
+export const CUE_STATE_TEXT_COLOR: Record<CueStateValue, RGB> = {
+	OFF: cueLightText,
+	STANDBY: cueDarkText,
+	GO: cueLightText,
 }
 
 export const CUE_CYCLE_NEXT: Record<CueStateValue, CueStateValue> = {

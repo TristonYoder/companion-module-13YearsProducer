@@ -1,21 +1,32 @@
 import { combineRgb } from '@companion-module/base'
 import type { CompanionPresetDefinitions, CompanionButtonStyleProps } from '@companion-module/base'
-
-type PresetFeedback = { feedbackId: string; options: Record<string, string | number>; style: Record<string, unknown> }
+import {
+	companionInfo,
+	companionNeutral,
+	companionRemote,
+	cueDarkText,
+	cueGo,
+	cueLightText,
+	cueOff,
+	cueStandby,
+	timerOvertime,
+} from './palette.js'
 import { CUE_STATE_COLOR, CUE_STATE_LABELS, CUE_STATE_TEXT_COLOR, FIRABLE_CUE_STATES } from './types.js'
 import { ModuleState, RUNDOWN_ROWS } from './state.js'
 import { TIMER_ENTRY_GLYPHS, TIMER_ENTRY_GLYPHS_DARK } from './glyphs.js'
 import { ICON_PLATES, ICONS } from './icons.js'
 
-const GREEN = combineRgb(38, 199, 89)
-const RED = combineRgb(204, 0, 0)
-const BLUE = combineRgb(74, 144, 226)
-const GREY = combineRgb(100, 100, 100)
-const WHITE = combineRgb(255, 255, 255)
-const DARK = combineRgb(20, 26, 38)
-const AMBER = combineRgb(245, 184, 38)
-const PURPLE = combineRgb(126, 87, 194)
-const INK_DARK = combineRgb(26, 26, 26)
+type PresetFeedback = { feedbackId: string; options: Record<string, string | number>; style: Record<string, unknown> }
+
+const GREEN = combineRgb(...cueGo)
+const RED = combineRgb(...timerOvertime)
+const BLUE = combineRgb(...companionInfo)
+const GREY = combineRgb(...companionNeutral)
+const WHITE = combineRgb(...cueLightText)
+const DARK = combineRgb(...cueOff)
+const AMBER = combineRgb(...cueStandby)
+const PURPLE = combineRgb(...companionRemote)
+const INK_DARK = combineRgb(...cueDarkText)
 
 const USE_GLYPH_KEY_FACES = true
 
