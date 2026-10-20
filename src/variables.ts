@@ -74,8 +74,6 @@ export function getVariableDefinitions(state: ModuleState): CompanionVariableDef
 		{ variableId: 'projected_end_time', name: 'Projected End Time (local HH:MM)' },
 		{ variableId: 'event_remaining_total', name: 'Event Time Remaining (live item + everything after)' },
 		{ variableId: 'event_over_under', name: 'Event Over/Under vs. Next Schedule (+ is over)' },
-		{ variableId: 'service_remaining_total', name: 'Event Time Remaining (Deprecated)' },
-		{ variableId: 'service_over_under', name: 'Event Over/Under vs. Next Schedule (Deprecated)' },
 		{ variableId: 'projected_end_clock', name: 'Projected End Time, In The Clock Format' },
 
 		{ variableId: 'rehearsal_mode', name: 'Rehearsal Mode On' },
@@ -231,8 +229,6 @@ export function getVariableValues(state: ModuleState): CompanionVariableValues {
 		projected_end_time: state.projectedEndText,
 		event_remaining_total: eventRemaining,
 		event_over_under: eventOverUnder,
-		service_remaining_total: eventRemaining,
-		service_over_under: eventOverUnder,
 		projected_end_clock: state.projectedEndClockText,
 
 		rehearsal_mode: state.isRehearsalMode ? 'yes' : 'no',

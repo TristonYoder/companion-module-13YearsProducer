@@ -100,7 +100,7 @@ Beyond cues and timers, the module can clear the selected Planning Center servic
 
 13 Years 1.7.0 added skips, rehearsal mode, recorded actuals (`liveOps` in the state snapshot), Planning Center item details on plan items, and a 12/24-hour clock format (`settings.clockFormat`, with a per-role override). The module reads all of them as optional: against an older Producer the new variables are blank or `no`, the new feedbacks are false, and the new actions warn that they need 1.7.0 (an unknown route answers 404 `Unknown path`, which the module tells apart from an unknown item). The next item comes from `timer.nextItem` when the Producer sends it, so it passes over headers, skipped items and items excluded from the live event time exactly as the app does; without it the module applies the same rules to the plan itself.
 
-User-facing copy says "event"; "service" stays only for Planning Center things (service types, Next Service). The two variables whose ids said service now have event-named counterparts, `event_remaining_total` and `event_over_under`; `service_remaining_total` and `service_over_under` stay as deprecated aliases with identical values, so existing buttons keep working.
+User-facing copy says "event"; "service" stays only for Planning Center things (service types, Next Service). In 1.7.0 the variables `service_remaining_total` and `service_over_under` were renamed to `event_remaining_total` and `event_over_under`; buttons that used the old names need the new ones.
 
 ## Colours
 

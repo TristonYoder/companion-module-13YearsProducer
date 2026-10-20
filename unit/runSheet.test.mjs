@@ -494,7 +494,7 @@ describe('presets', () => {
 })
 
 describe('event-named variables', () => {
-	test('event_ variables and their deprecated service_ aliases carry the same values', () => {
+	test('event_ variables carry the totals and the service_ names are gone', () => {
 		const items = [item('a', { lengthInSeconds: 100 }), item('b', { lengthInSeconds: 200 })]
 		const state = stateWith(
 			baseSnapshot({
@@ -505,11 +505,11 @@ describe('event-named variables', () => {
 		)
 		const values = getVariableValues(state)
 		assert.equal(values.event_remaining_total, '05:00')
-		assert.equal(values.service_remaining_total, values.event_remaining_total)
-		assert.equal(values.service_over_under, values.event_over_under)
-		const names = new Map(getVariableDefinitions(state).map((d) => [d.variableId, d.name]))
-		for (const id of ['event_remaining_total', 'event_over_under']) assert.doesNotMatch(names.get(id), /Deprecated/)
-		for (const id of ['service_remaining_total', 'service_over_under']) assert.match(names.get(id), /\(Deprecated\)$/)
+		assert.equal('service_remaining_total' in values, false)
+		assert.equal('service_over_under' in values, false)
+		const ids = getVariableDefinitions(state).map((d) => d.variableId)
+		assert.ok(ids.includes('event_remaining_total') && ids.includes('event_over_under'))
+		assert.ok(!ids.includes('service_remaining_total') && !ids.includes('service_over_under'))
 	})
 
 	test('timing presets use the event_ variables', () => {
