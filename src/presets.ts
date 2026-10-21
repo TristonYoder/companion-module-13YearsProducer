@@ -1,21 +1,34 @@
 import { combineRgb } from '@companion-module/base'
 import type { CompanionPresetDefinitions, CompanionButtonStyleProps } from '@companion-module/base'
-
-type PresetFeedback = { feedbackId: string; options: Record<string, string | number>; style: Record<string, unknown> }
+import {
+	companionDisabledText,
+	companionInfo,
+	companionNeutral,
+	companionRemote,
+	cueDarkText,
+	cueGo,
+	cueLightText,
+	cueOff,
+	cueStandby,
+	timerOvertime,
+} from './palette.js'
 import { CUE_STATE_COLOR, CUE_STATE_LABELS, CUE_STATE_TEXT_COLOR, FIRABLE_CUE_STATES } from './types.js'
 import { ModuleState, RUNDOWN_ROWS } from './state.js'
 import { TIMER_ENTRY_GLYPHS, TIMER_ENTRY_GLYPHS_DARK } from './glyphs.js'
 import { ICON_PLATES, ICONS } from './icons.js'
 
-const GREEN = combineRgb(38, 199, 89)
-const RED = combineRgb(204, 0, 0)
-const BLUE = combineRgb(74, 144, 226)
-const GREY = combineRgb(100, 100, 100)
-const WHITE = combineRgb(255, 255, 255)
-const DARK = combineRgb(20, 26, 38)
-const AMBER = combineRgb(245, 184, 38)
-const PURPLE = combineRgb(126, 87, 194)
-const INK_DARK = combineRgb(26, 26, 26)
+type PresetFeedback = { feedbackId: string; options: Record<string, string | number>; style: Record<string, unknown> }
+
+const GREEN = combineRgb(...cueGo)
+const RED = combineRgb(...timerOvertime)
+const BLUE = combineRgb(...companionInfo)
+const GREY = combineRgb(...companionNeutral)
+const WHITE = combineRgb(...cueLightText)
+const DARK = combineRgb(...cueOff)
+const AMBER = combineRgb(...cueStandby)
+const PURPLE = combineRgb(...companionRemote)
+const INK_DARK = combineRgb(...cueDarkText)
+const DIM_TEXT = combineRgb(...companionDisabledText)
 
 const USE_GLYPH_KEY_FACES = true
 
@@ -203,7 +216,7 @@ export function getPresetDefinitions(
 
 	presets['plan_previous'] = {
 		type: 'button',
-		category: 'Service Navigation',
+		category: 'Event Navigation',
 		name: 'Previous Item',
 		style: face({ icon: 'planPrevious', label: 'Prev Item', color: BLUE }),
 		feedbacks: [{ feedbackId: 'atStartOfPlan', options: {}, style: bg(GREY) }],
@@ -212,7 +225,7 @@ export function getPresetDefinitions(
 
 	presets['plan_next'] = {
 		type: 'button',
-		category: 'Service Navigation',
+		category: 'Event Navigation',
 		name: 'Next Item',
 		style: face({ icon: 'planNext', label: 'Next Item', color: BLUE }),
 		feedbacks: [
@@ -227,7 +240,7 @@ export function getPresetDefinitions(
 
 	presets['plan_next_service'] = {
 		type: 'button',
-		category: 'Service Navigation',
+		category: 'Event Navigation',
 		name: 'Load Next Service',
 		style: face({ icon: 'planNextService', label: 'Next Service', color: PURPLE }),
 		feedbacks: [],
@@ -236,7 +249,7 @@ export function getPresetDefinitions(
 
 	presets['active_item_status'] = {
 		type: 'button',
-		category: 'Service Navigation',
+		category: 'Event Navigation',
 		name: 'Active Item & Time Remaining',
 		style: face({
 			label: '$(13yearsproducer:active_item_title)\\n$(13yearsproducer:active_item_remaining)',
@@ -252,7 +265,7 @@ export function getPresetDefinitions(
 
 	presets['plan_next_hold'] = {
 		type: 'button',
-		category: 'Service Navigation',
+		category: 'Event Navigation',
 		name: 'Next Item (Hold Clock)',
 		style: face({ icon: 'planNext', label: 'Next (Hold)', color: AMBER }),
 		feedbacks: [{ feedbackId: 'atEndOfPlan', options: {}, style: bg(GREY) }],
@@ -261,7 +274,7 @@ export function getPresetDefinitions(
 
 	presets['countdown_stages'] = {
 		type: 'button',
-		category: 'Service Navigation',
+		category: 'Event Navigation',
 		name: 'Countdown (amber at 60s, red at 30s)',
 		style: face({
 			label: '$(13yearsproducer:active_item_title)\\n$(13yearsproducer:active_item_remaining)',
@@ -288,15 +301,15 @@ export function getPresetDefinitions(
 			icon: 'timerClock',
 		},
 		{
-			id: 'service_remaining',
-			name: 'Service Time Remaining',
-			label: 'Left\\n$(13yearsproducer:service_remaining_total)',
+			id: 'event_remaining',
+			name: 'Event Time Remaining',
+			label: 'Left\\n$(13yearsproducer:event_remaining_total)',
 			icon: 'stopwatch',
 		},
 		{
-			id: 'service_over_under',
-			name: 'Service Over/Under (needs a schedule)',
-			label: 'Over/Under\\n$(13yearsproducer:service_over_under)',
+			id: 'event_over_under',
+			name: 'Event Over/Under (needs a schedule)',
+			label: 'Over/Under\\n$(13yearsproducer:event_over_under)',
 			icon: 'schedule',
 		},
 		{
@@ -309,7 +322,7 @@ export function getPresetDefinitions(
 	for (const t of timingStatus) {
 		presets[`timing_${t.id}`] = {
 			type: 'button',
-			category: 'Service Timing',
+			category: 'Event Timing',
 			name: t.name,
 			style: face({ icon: t.icon, label: t.label, color: DARK, size: 'auto' }),
 			feedbacks: [],
@@ -319,7 +332,7 @@ export function getPresetDefinitions(
 
 	presets['timing_progress'] = {
 		type: 'button',
-		category: 'Service Timing',
+		category: 'Event Timing',
 		name: 'Live Item Progress',
 		style: {
 			text: '$(13yearsproducer:active_item_progress_pct)%',
@@ -342,7 +355,10 @@ export function getPresetDefinitions(
 				color: DARK,
 				size: 'auto',
 			}),
-			feedbacks: [{ feedbackId: 'planItemIsActive', options: { rowIndex: row }, style: bg(GREEN) }],
+			feedbacks: [
+				{ feedbackId: 'rundownRowSkipped', options: { rowIndex: row }, style: { color: DIM_TEXT } },
+				{ feedbackId: 'planItemIsActive', options: { rowIndex: row }, style: bg(GREEN) },
+			],
 			steps: [{ down: [{ actionId: 'planJumpToRow', options: { rowIndex: row } }], up: [] }],
 		}
 	}
@@ -411,8 +427,18 @@ export function getPresetDefinitions(
 		steps: [{ down: [], up: [] }],
 	}
 
-	const signFeedback = (sign: '+' | '-', glyph: string) => [
+	const keyFace = (glyph: string, label: string) =>
+		USE_GLYPH_KEY_FACES ? { png64: TIMER_ENTRY_GLYPHS[glyph] } : { text: label }
+	const litKey = (color: number, glyph: string, label: string) =>
+		USE_GLYPH_KEY_FACES ? lit(color, glyph) : { bgcolor: color, color: INK_DARK, text: label }
+	const signFeedback = (sign: '+' | '-', glyph: string, meridiem: 'am' | 'pm'): PresetFeedback[] => [
 		{ feedbackId: 'timerEntrySignIs', options: { sign }, style: lit(BLUE, glyph) },
+		{ feedbackId: 'timerEntryEndAt', options: {}, style: keyFace(meridiem, meridiem.toUpperCase()) },
+		{
+			feedbackId: 'timerEntryMeridiemIs',
+			options: { meridiem },
+			style: litKey(BLUE, meridiem, meridiem.toUpperCase()),
+		},
 	]
 	entryKey(
 		'clear',
@@ -433,8 +459,11 @@ export function getPresetDefinitions(
 		'R2C4',
 		'minus',
 		'−',
-		[{ actionId: 'timerEntrySign', options: { sign: '-' } }],
-		signFeedback('-', 'minus'),
+		[
+			{ actionId: 'timerEntrySign', options: { sign: '-' } },
+			{ actionId: 'timerEntryMeridiem', options: { meridiem: 'am' } },
+		],
+		signFeedback('-', 'minus', 'am'),
 	)
 	entryKey('4', 'R3C1', '4', '4', entryAppend('4'))
 	entryKey('5', 'R3C2', '5', '5', entryAppend('5'))
@@ -444,8 +473,11 @@ export function getPresetDefinitions(
 		'R3C4',
 		'plus',
 		'+',
-		[{ actionId: 'timerEntrySign', options: { sign: '+' } }],
-		signFeedback('+', 'plus'),
+		[
+			{ actionId: 'timerEntrySign', options: { sign: '+' } },
+			{ actionId: 'timerEntryMeridiem', options: { meridiem: 'pm' } },
+		],
+		signFeedback('+', 'plus', 'pm'),
 	)
 	entryKey('1', 'R4C1', '1', '1', entryAppend('1'))
 	entryKey('2', 'R4C2', '2', '2', entryAppend('2'))
@@ -467,6 +499,14 @@ export function getPresetDefinitions(
 		'⌫',
 		[{ actionId: 'timerEntryBackspace', options: {} }],
 		[{ feedbackId: 'timerEntryInProgress', options: {}, style: lit(AMBER, 'backspace') }],
+	)
+	entryKey(
+		'end_at',
+		'R5C4',
+		'endAt',
+		'End @',
+		[{ actionId: 'timerEntryEndAt', options: { mode: 'toggle' } }],
+		[{ feedbackId: 'timerEntryEndAt', options: {}, style: litKey(BLUE, 'endAt', 'End @') }],
 	)
 
 	const firstWaypoint = state.waypointChoices()[0]?.id ?? ''
@@ -543,7 +583,7 @@ export function getPresetDefinitions(
 
 	presets['schedule_go_live_next'] = {
 		type: 'button',
-		category: 'Service Schedules',
+		category: 'Event Schedules',
 		name: 'Bring Next Schedule Live',
 		style: face({ icon: 'scheduleGoLive', label: 'Go Live Now', color: GREEN }),
 		feedbacks: [
@@ -559,7 +599,7 @@ export function getPresetDefinitions(
 
 	presets['schedule_go_live'] = {
 		type: 'button',
-		category: 'Service Schedules',
+		category: 'Event Schedules',
 		name: 'Bring A Specific Schedule Live',
 		style: face({ icon: 'schedule', label: 'Go Live', color: GREEN }),
 		feedbacks: [
@@ -575,8 +615,8 @@ export function getPresetDefinitions(
 
 	presets['next_schedule_status'] = {
 		type: 'button',
-		category: 'Service Schedules',
-		name: 'Next Service (status)',
+		category: 'Event Schedules',
+		name: 'Next Scheduled Event (status)',
 		style: face({ icon: 'schedule', label: '$(13yearsproducer:next_schedule_title)', color: DARK, size: 'auto' }),
 		feedbacks: [{ feedbackId: 'hasUpcomingSchedule', options: {}, style: bg(BLUE) }],
 		steps: [{ down: [], up: [] }],
@@ -598,6 +638,106 @@ export function getPresetDefinitions(
 		style: face({ icon: 'schedule', label: '$(13yearsproducer:event_time_live)', color: DARK, size: 'auto' }),
 		feedbacks: [],
 		steps: [{ down: [], up: [] }],
+	}
+
+	presets['run_sheet_skip_next'] = {
+		type: 'button',
+		category: 'Run Sheet',
+		name: 'Skip Next Item',
+		style: face({ icon: 'skip', label: 'Skip\\n$(13yearsproducer:next_item_title)', color: GREY, size: 'auto' }),
+		feedbacks: [],
+		steps: [{ down: [{ actionId: 'planSkipItem', options: { target: 'next', itemId: '', mode: 'skip' } }], up: [] }],
+	}
+
+	presets['run_sheet_skip_live'] = {
+		type: 'button',
+		category: 'Run Sheet',
+		name: 'Skip / Unskip Live Item',
+		style: face({ icon: 'skip', label: 'Skip Live', color: GREY }),
+		feedbacks: [{ feedbackId: 'planItemSkipped', options: { itemId: '' }, style: { bgcolor: DARK, color: DIM_TEXT } }],
+		steps: [{ down: [{ actionId: 'planSkipItem', options: { target: 'live', itemId: '', mode: 'toggle' } }], up: [] }],
+	}
+
+	presets['run_sheet_rehearsal'] = {
+		type: 'button',
+		category: 'Run Sheet',
+		name: 'Rehearsal Mode (toggle)',
+		style: face({ icon: 'rehearsal', label: 'Rehearsal', color: GREY }),
+		feedbacks: [{ feedbackId: 'rehearsalMode', options: {}, style: { bgcolor: AMBER, color: INK_DARK } }],
+		steps: [{ down: [{ actionId: 'rehearsalMode', options: { mode: 'toggle', planTimeId: '' } }], up: [] }],
+	}
+
+	presets['run_sheet_actuals'] = {
+		type: 'button',
+		category: 'Run Sheet',
+		name: 'Actual vs. Planned (status)',
+		style: face({
+			icon: 'actuals',
+			label: 'Actual\\n$(13yearsproducer:actual_over_under)',
+			color: DARK,
+			size: 'auto',
+		}),
+		feedbacks: [{ feedbackId: 'rehearsalMode', options: {}, style: { bgcolor: AMBER, color: INK_DARK } }],
+		steps: [{ down: [], up: [] }],
+	}
+
+	presets['run_sheet_live_music'] = {
+		type: 'button',
+		category: 'Run Sheet',
+		name: 'Live Item Key · BPM · Meter (status)',
+		style: face({ icon: 'music', label: '$(13yearsproducer:active_item_music)', color: DARK, size: 'auto' }),
+		feedbacks: [],
+		steps: [{ down: [], up: [] }],
+	}
+
+	presets['run_sheet_next_music'] = {
+		type: 'button',
+		category: 'Run Sheet',
+		name: 'Next Item Key · BPM · Meter (status)',
+		style: face({
+			icon: 'music',
+			label: 'Next\\n$(13yearsproducer:next_item_music)',
+			color: DARK,
+			size: 'auto',
+		}),
+		feedbacks: [],
+		steps: [{ down: [], up: [] }],
+	}
+
+	presets['run_sheet_live_leader'] = {
+		type: 'button',
+		category: 'Run Sheet',
+		name: 'Live Item Leader (status)',
+		style: face({ icon: 'roles', label: '$(13yearsproducer:active_item_leader)', color: DARK, size: 'auto' }),
+		feedbacks: [],
+		steps: [{ down: [], up: [] }],
+	}
+
+	presets['clock_producer'] = {
+		type: 'button',
+		category: 'Clock',
+		name: 'Producer Clock (press for 12/24-hour)',
+		style: face({ icon: 'timerClock', label: '$(13yearsproducer:producer_clock)', color: DARK, size: 'auto' }),
+		feedbacks: [],
+		steps: [{ down: [{ actionId: 'setClockFormat', options: { format: 'toggle' } }], up: [] }],
+	}
+
+	presets['clock_format_12'] = {
+		type: 'button',
+		category: 'Clock',
+		name: '12-hour Clock',
+		style: face({ icon: 'timerClock', label: '12-hour', color: GREY }),
+		feedbacks: [{ feedbackId: 'clockFormatIs', options: { format: 'twelveHour' }, style: bg(BLUE) }],
+		steps: [{ down: [{ actionId: 'setClockFormat', options: { format: 'twelveHour' } }], up: [] }],
+	}
+
+	presets['clock_format_24'] = {
+		type: 'button',
+		category: 'Clock',
+		name: '24-hour Clock',
+		style: face({ icon: 'timerClock', label: '24-hour', color: GREY }),
+		feedbacks: [{ feedbackId: 'clockFormatIs', options: { format: 'twentyFourHour' }, style: bg(BLUE) }],
+		steps: [{ down: [{ actionId: 'setClockFormat', options: { format: 'twentyFourHour' } }], up: [] }],
 	}
 
 	presets['duration_toggle_live'] = {
@@ -694,6 +834,15 @@ export function getPresetDefinitions(
 		style: face({ icon: 'pcoSync', label: 'Release', color: GREY }),
 		feedbacks: [],
 		steps: [{ down: [{ actionId: 'pcoSetLiveSync', options: { enabled: false } }], up: [] }],
+	}
+
+	presets['pco_save_actuals'] = {
+		type: 'button',
+		category: 'Planning Center',
+		name: 'Save Actual Lengths To Planning Center',
+		style: face({ icon: 'actuals', label: 'Save Actuals', color: GREY }),
+		feedbacks: [],
+		steps: [{ down: [{ actionId: 'actualsSaveToPco', options: {} }], up: [] }],
 	}
 
 	presets['pco_status'] = {

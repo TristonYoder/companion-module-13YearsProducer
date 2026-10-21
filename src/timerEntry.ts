@@ -1,8 +1,61 @@
 import type { HourFormatThreshold } from './types.js'
 
-export type TimerInputAction = { kind: 'setAbsolute'; seconds: number } | { kind: 'adjustRelative'; bySeconds: number }
+export type TimerInputAction =
+	| { kind: 'setAbsolute'; seconds: number }
+	| { kind: 'adjustRelative'; bySeconds: number }
+	| { kind: 'endAt'; hour: number; minute: number }
 
 export type TimerEntrySign = '+' | '-'
+
+export type Meridiem = 'am' | 'pm'
+
+export function parseClock(raw: string): { hour: number; minute: number } | null {
+	const text = raw.trim()
+	if (!text) return null
+	let hourText: string
+	let minuteText: string
+	const colon = text.indexOf(':')
+	if (colon !== -1) {
+		hourText = text.slice(0, colon)
+		minuteText = text.slice(colon + 1)
+		if (!hourText || minuteText.length > 2) return null
+	} else {
+		if (text.length > 4) return null
+		if (text.length <= 2) {
+			hourText = text
+			minuteText = ''
+		} else {
+			hourText = text.slice(0, -2)
+			minuteText = text.slice(-2)
+		}
+	}
+	if (!/^[0-9]+$/.test(hourText) || !/^[0-9]*$/.test(minuteText)) return null
+	const hour = Number(hourText)
+	if (hour > 23) return null
+	const minute = minuteText ? Number(minuteText) : 0
+	if (minute > 59) return null
+	return { hour, minute }
+}
+
+export function parseEndAt(raw: string, meridiem: Meridiem | null): TimerInputAction | null {
+	const clock = parseClock(raw)
+	if (!clock) return null
+	if (!meridiem) return { kind: 'endAt', hour: clock.hour, minute: clock.minute }
+	if (clock.hour < 1 || clock.hour > 12) return null
+	return { kind: 'endAt', hour: (clock.hour % 12) + (meridiem === 'pm' ? 12 : 0), minute: clock.minute }
+}
+
+export function endAtTimeText(action: { hour: number; minute: number }): string {
+	return `${pad2(action.hour)}:${pad2(action.minute)}`
+}
+
+export function secondsUntilClockTime(hour: number, minute: number, nowMs: number, utcOffsetSeconds: number): number {
+	const offsetMs = utcOffsetSeconds * 1000
+	const local = new Date(nowMs + offsetMs)
+	let target = Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate(), hour, minute, 0) - offsetMs
+	if (target < nowMs) target += 86_400_000
+	return Math.max(0, Math.round((target - nowMs) / 1000))
+}
 
 export function parseTimerInput(raw: string): TimerInputAction | null {
 	const trimmed = raw.trim()
@@ -116,10 +169,18 @@ function pad2(value: number): string {
 	return String(value).padStart(2, '0')
 }
 
-export function resolvedSeconds(action: TimerInputAction, baseSeconds: number, elapsedSeconds = 0): number {
+export function resolvedSeconds(
+	action: Exclude<TimerInputAction, { kind: 'endAt' }>,
+	baseSeconds: number,
+	elapsedSeconds = 0,
+): number {
 	return action.kind === 'setAbsolute'
 		? Math.max(0, action.seconds)
 		: Math.max(0 - elapsedSeconds, baseSeconds + action.bySeconds)
+}
+
+export function endAtPreviewText(clockText: string, remainingSeconds: number, threshold: HourFormatThreshold): string {
+	return `End @ ${clockText}\n\u2192 ${formatDuration(Math.max(0, remainingSeconds), threshold)} remaining`
 }
 
 export function previewText(
@@ -129,7 +190,7 @@ export function previewText(
 	elapsedSeconds = 0,
 ): string {
 	const action = parseTimerInput(buffer)
-	if (!action) return ''
+	if (!action || action.kind === 'endAt') return ''
 	if (action.kind === 'adjustRelative' && baseSeconds === null) return ''
 
 	const result = formatDuration(resolvedSeconds(action, baseSeconds ?? 0, elapsedSeconds), threshold)

@@ -2,7 +2,25 @@ import { combineRgb, type CompanionFeedbackDefinitions } from '@companion-module
 import type { ModuleState } from './state.js'
 import { progressBarPng } from './progress.js'
 import { RUNDOWN_ROWS } from './state.js'
-import { optString, CUE_STATES, CUE_STATE_COLOR, CUE_STATE_TEXT_COLOR, CUE_STATE_LABELS } from './types.js'
+import {
+	companionDisabledFill,
+	companionDisabledText,
+	companionInfo,
+	companionRemote,
+	cueDarkText,
+	cueGo,
+	cueLightText,
+	cueStandby,
+	timerOvertime,
+} from './palette.js'
+import {
+	optString,
+	CLOCK_FORMATS,
+	CUE_STATES,
+	CUE_STATE_COLOR,
+	CUE_STATE_TEXT_COLOR,
+	CUE_STATE_LABELS,
+} from './types.js'
 
 export function getFeedbackDefinitions(state: ModuleState): CompanionFeedbackDefinitions {
 	const roleChoices = state.roleChoices()
@@ -85,8 +103,8 @@ export function getFeedbackDefinitions(state: ModuleState): CompanionFeedbackDef
 				},
 			],
 			defaultStyle: {
-				bgcolor: combineRgb(74, 144, 226),
-				color: combineRgb(255, 255, 255),
+				bgcolor: combineRgb(...companionInfo),
+				color: combineRgb(...cueLightText),
 			},
 			callback: (feedback) => state.isRoleSelected(optString(feedback.options.roleId)),
 		},
@@ -96,8 +114,8 @@ export function getFeedbackDefinitions(state: ModuleState): CompanionFeedbackDef
 			name: 'Last Action Failed (for 10 seconds)',
 			options: [],
 			defaultStyle: {
-				bgcolor: combineRgb(204, 0, 0),
-				color: combineRgb(255, 255, 255),
+				bgcolor: combineRgb(...timerOvertime),
+				color: combineRgb(...cueLightText),
 			},
 			callback: () => state.actionFailed,
 		},
@@ -107,8 +125,8 @@ export function getFeedbackDefinitions(state: ModuleState): CompanionFeedbackDef
 			name: 'Timer Running',
 			options: [],
 			defaultStyle: {
-				bgcolor: combineRgb(38, 199, 89),
-				color: combineRgb(255, 255, 255),
+				bgcolor: combineRgb(...cueGo),
+				color: combineRgb(...cueLightText),
 			},
 			callback: () => {
 				return state.timer?.isRunning === true
@@ -120,8 +138,8 @@ export function getFeedbackDefinitions(state: ModuleState): CompanionFeedbackDef
 			name: 'Timer Overtime',
 			options: [],
 			defaultStyle: {
-				bgcolor: combineRgb(204, 0, 0),
-				color: combineRgb(255, 255, 255),
+				bgcolor: combineRgb(...timerOvertime),
+				color: combineRgb(...cueLightText),
 			},
 			callback: () => {
 				return state.timerIsOvertime
@@ -142,8 +160,8 @@ export function getFeedbackDefinitions(state: ModuleState): CompanionFeedbackDef
 				},
 			],
 			defaultStyle: {
-				bgcolor: combineRgb(204, 0, 0),
-				color: combineRgb(255, 255, 255),
+				bgcolor: combineRgb(...timerOvertime),
+				color: combineRgb(...cueLightText),
 			},
 			callback: (feedback) => {
 				const remaining = state.timerRemainingSeconds
@@ -158,8 +176,8 @@ export function getFeedbackDefinitions(state: ModuleState): CompanionFeedbackDef
 			name: 'Connection Lost',
 			options: [],
 			defaultStyle: {
-				bgcolor: combineRgb(204, 0, 0),
-				color: combineRgb(255, 255, 255),
+				bgcolor: combineRgb(...timerOvertime),
+				color: combineRgb(...cueLightText),
 			},
 			callback: () => {
 				return state.isSocketConnected === false
@@ -171,8 +189,8 @@ export function getFeedbackDefinitions(state: ModuleState): CompanionFeedbackDef
 			name: 'Connection Stale (connected, but no data lately)',
 			options: [],
 			defaultStyle: {
-				bgcolor: combineRgb(245, 184, 38),
-				color: combineRgb(26, 26, 26),
+				bgcolor: combineRgb(...cueStandby),
+				color: combineRgb(...cueDarkText),
 			},
 			callback: () => {
 				return state.isStale
@@ -193,11 +211,94 @@ export function getFeedbackDefinitions(state: ModuleState): CompanionFeedbackDef
 				},
 			],
 			defaultStyle: {
-				bgcolor: combineRgb(38, 199, 89),
-				color: combineRgb(255, 255, 255),
+				bgcolor: combineRgb(...cueGo),
+				color: combineRgb(...cueLightText),
 			},
 			callback: (feedback) => {
 				return state.isRundownRowActive(Number(feedback.options.rowIndex))
+			},
+		},
+
+		rundownRowSkipped: {
+			type: 'boolean',
+			name: 'Rundown Row Is Skipped',
+			description:
+				'True when the item on this row is skipped, or excluded from the live event time in Planning Center, so Next passes over it.',
+			options: [
+				{
+					type: 'number',
+					id: 'rowIndex',
+					label: 'Row (1-8 on the current rundown page)',
+					default: 1,
+					min: 1,
+					max: RUNDOWN_ROWS,
+				},
+			],
+			defaultStyle: {
+				bgcolor: combineRgb(...companionDisabledFill),
+				color: combineRgb(...companionDisabledText),
+			},
+			callback: (feedback) => {
+				return state.isRundownRowSkipped(Number(feedback.options.rowIndex))
+			},
+		},
+
+		planItemSkipped: {
+			type: 'boolean',
+			name: 'Plan Item Is Skipped',
+			description: 'True while this item is skipped for the live event time (or in rehearsal, for rehearsal).',
+			options: [
+				{
+					type: 'dropdown',
+					id: 'itemId',
+					label: 'Plan Item (blank = the live item)',
+					choices: planItemChoices,
+					default: '',
+					allowCustom: true,
+				},
+			],
+			defaultStyle: {
+				bgcolor: combineRgb(...companionDisabledFill),
+				color: combineRgb(...companionDisabledText),
+			},
+			callback: (feedback) => {
+				const itemId = optString(feedback.options.itemId) || state.timer?.item.id
+				return itemId ? state.isItemSkipped(itemId) : false
+			},
+		},
+
+		rehearsalMode: {
+			type: 'boolean',
+			name: 'Rehearsal Mode On',
+			options: [],
+			defaultStyle: {
+				bgcolor: combineRgb(...cueStandby),
+				color: combineRgb(...cueDarkText),
+			},
+			callback: () => {
+				return state.isRehearsalMode
+			},
+		},
+
+		clockFormatIs: {
+			type: 'boolean',
+			name: 'Clock Format Is',
+			description: "True while the Producer's clock format matches. False on a Producer older than 1.7.0.",
+			options: [
+				{
+					type: 'dropdown',
+					id: 'format',
+					label: 'Clock format',
+					choices: CLOCK_FORMATS,
+					default: 'twentyFourHour',
+				},
+			],
+			defaultStyle: {
+				bgcolor: combineRgb(...companionInfo),
+				color: combineRgb(...cueLightText),
+			},
+			callback: (feedback) => {
+				return state.clockFormat === optString(feedback.options.format)
 			},
 		},
 
@@ -215,8 +316,8 @@ export function getFeedbackDefinitions(state: ModuleState): CompanionFeedbackDef
 			name: 'At Start Of Plan',
 			options: [],
 			defaultStyle: {
-				bgcolor: combineRgb(72, 72, 78),
-				color: combineRgb(150, 150, 156),
+				bgcolor: combineRgb(...companionDisabledFill),
+				color: combineRgb(...companionDisabledText),
 			},
 			callback: () => {
 				return state.isAtStartOfPlan
@@ -228,8 +329,8 @@ export function getFeedbackDefinitions(state: ModuleState): CompanionFeedbackDef
 			name: 'At End Of Plan',
 			options: [],
 			defaultStyle: {
-				bgcolor: combineRgb(245, 184, 38),
-				color: combineRgb(26, 26, 26),
+				bgcolor: combineRgb(...cueStandby),
+				color: combineRgb(...cueDarkText),
 			},
 			callback: () => {
 				return state.plan?.isAtEndOfPlan === true
@@ -241,8 +342,8 @@ export function getFeedbackDefinitions(state: ModuleState): CompanionFeedbackDef
 			name: 'Timer Entry Is Committable',
 			options: [],
 			defaultStyle: {
-				bgcolor: combineRgb(38, 199, 89),
-				color: combineRgb(255, 255, 255),
+				bgcolor: combineRgb(...cueGo),
+				color: combineRgb(...cueLightText),
 			},
 			callback: () => {
 				return state.timerEntryAction !== null
@@ -265,8 +366,8 @@ export function getFeedbackDefinitions(state: ModuleState): CompanionFeedbackDef
 				},
 			],
 			defaultStyle: {
-				bgcolor: combineRgb(74, 144, 226),
-				color: combineRgb(255, 255, 255),
+				bgcolor: combineRgb(...companionInfo),
+				color: combineRgb(...cueLightText),
 			},
 			callback: (feedback) => {
 				return state.timerEntrySign === optString(feedback.options.sign)
@@ -278,11 +379,50 @@ export function getFeedbackDefinitions(state: ModuleState): CompanionFeedbackDef
 			name: 'Timer Entry In Progress',
 			options: [],
 			defaultStyle: {
-				bgcolor: combineRgb(245, 184, 38),
-				color: combineRgb(26, 26, 26),
+				bgcolor: combineRgb(...cueStandby),
+				color: combineRgb(...cueDarkText),
 			},
 			callback: () => {
 				return state.timerEntryBuffer.length > 0
+			},
+		},
+
+		timerEntryEndAt: {
+			type: 'boolean',
+			name: 'Timer Entry In End @ Mode',
+			description: 'True while the keypad is taking a clock time to end the live item at.',
+			options: [],
+			defaultStyle: {
+				bgcolor: combineRgb(...companionInfo),
+				color: combineRgb(...cueLightText),
+			},
+			callback: () => {
+				return state.timerEntryEndAt
+			},
+		},
+
+		timerEntryMeridiemIs: {
+			type: 'boolean',
+			name: 'Timer Entry AM/PM Is',
+			description: 'True in End @ mode while the typed time is read as AM (or PM).',
+			options: [
+				{
+					type: 'dropdown',
+					id: 'meridiem',
+					label: 'AM/PM',
+					choices: [
+						{ id: 'am', label: 'AM' },
+						{ id: 'pm', label: 'PM' },
+					],
+					default: 'am',
+				},
+			],
+			defaultStyle: {
+				bgcolor: combineRgb(...companionInfo),
+				color: combineRgb(...cueLightText),
+			},
+			callback: (feedback) => {
+				return state.timerEntryEndAt && state.timerEntryMeridiem === optString(feedback.options.meridiem)
 			},
 		},
 
@@ -291,8 +431,8 @@ export function getFeedbackDefinitions(state: ModuleState): CompanionFeedbackDef
 			name: 'Planning Center Connected',
 			options: [],
 			defaultStyle: {
-				bgcolor: combineRgb(38, 199, 89),
-				color: combineRgb(255, 255, 255),
+				bgcolor: combineRgb(...cueGo),
+				color: combineRgb(...cueLightText),
 			},
 			callback: () => {
 				return state.pco?.isConnected === true
@@ -315,8 +455,8 @@ export function getFeedbackDefinitions(state: ModuleState): CompanionFeedbackDef
 				},
 			],
 			defaultStyle: {
-				bgcolor: combineRgb(74, 144, 226),
-				color: combineRgb(255, 255, 255),
+				bgcolor: combineRgb(...companionInfo),
+				color: combineRgb(...cueLightText),
 			},
 			callback: (feedback) => {
 				return state.isWaypointAssigned(optString(feedback.options.waypoint))
@@ -339,8 +479,8 @@ export function getFeedbackDefinitions(state: ModuleState): CompanionFeedbackDef
 				},
 			],
 			defaultStyle: {
-				bgcolor: combineRgb(38, 199, 89),
-				color: combineRgb(255, 255, 255),
+				bgcolor: combineRgb(...cueGo),
+				color: combineRgb(...cueLightText),
 			},
 			callback: (feedback) => {
 				const waypoint = state.waypointByRef(optString(feedback.options.waypoint))
@@ -356,8 +496,8 @@ export function getFeedbackDefinitions(state: ModuleState): CompanionFeedbackDef
 				"True when the live item is showing as Actual \u2014 reads the displayed value, so it follows the transient override as well as the plan item's own flag.",
 			options: [],
 			defaultStyle: {
-				bgcolor: combineRgb(126, 87, 194),
-				color: combineRgb(255, 255, 255),
+				bgcolor: combineRgb(...companionRemote),
+				color: combineRgb(...cueLightText),
 			},
 			callback: () => {
 				return state.timer?.isDurationActualForDisplay === true
@@ -379,8 +519,8 @@ export function getFeedbackDefinitions(state: ModuleState): CompanionFeedbackDef
 				},
 			],
 			defaultStyle: {
-				bgcolor: combineRgb(126, 87, 194),
-				color: combineRgb(255, 255, 255),
+				bgcolor: combineRgb(...companionRemote),
+				color: combineRgb(...cueLightText),
 			},
 			callback: (feedback) => {
 				const requested = optString(feedback.options.itemId)
@@ -397,8 +537,8 @@ export function getFeedbackDefinitions(state: ModuleState): CompanionFeedbackDef
 				'True while a message is still showing as a lower third on the pagers — i.e. while the Dismiss button would do something.',
 			options: [],
 			defaultStyle: {
-				bgcolor: combineRgb(245, 184, 38),
-				color: combineRgb(26, 26, 26),
+				bgcolor: combineRgb(...cueStandby),
+				color: combineRgb(...cueDarkText),
 			},
 			callback: () => {
 				return state.hasStandingNotification
@@ -419,8 +559,8 @@ export function getFeedbackDefinitions(state: ModuleState): CompanionFeedbackDef
 				},
 			],
 			defaultStyle: {
-				bgcolor: combineRgb(38, 199, 89),
-				color: combineRgb(255, 255, 255),
+				bgcolor: combineRgb(...cueGo),
+				color: combineRgb(...cueLightText),
 			},
 			callback: (feedback) => {
 				return state.scheduleById(optString(feedback.options.scheduleId))?.isEnabled === true
@@ -441,8 +581,8 @@ export function getFeedbackDefinitions(state: ModuleState): CompanionFeedbackDef
 				},
 			],
 			defaultStyle: {
-				bgcolor: combineRgb(74, 144, 226),
-				color: combineRgb(255, 255, 255),
+				bgcolor: combineRgb(...companionInfo),
+				color: combineRgb(...cueLightText),
 			},
 			callback: (feedback) => {
 				return state.schedules?.nextId === optString(feedback.options.scheduleId)
@@ -456,8 +596,8 @@ export function getFeedbackDefinitions(state: ModuleState): CompanionFeedbackDef
 				'True when the app has any enabled schedule still ahead of now — pair it with the Next Schedule status button.',
 			options: [],
 			defaultStyle: {
-				bgcolor: combineRgb(74, 144, 226),
-				color: combineRgb(255, 255, 255),
+				bgcolor: combineRgb(...companionInfo),
+				color: combineRgb(...cueLightText),
 			},
 			callback: () => {
 				return state.nextSchedule !== undefined
@@ -470,8 +610,8 @@ export function getFeedbackDefinitions(state: ModuleState): CompanionFeedbackDef
 			description: 'True when the live event time is not the last one, so Next Event Time has somewhere to go.',
 			options: [],
 			defaultStyle: {
-				bgcolor: combineRgb(74, 144, 226),
-				color: combineRgb(255, 255, 255),
+				bgcolor: combineRgb(...companionInfo),
+				color: combineRgb(...cueLightText),
 			},
 			callback: () => {
 				return !!state.eventTimes?.nextId
@@ -483,8 +623,8 @@ export function getFeedbackDefinitions(state: ModuleState): CompanionFeedbackDef
 			name: 'Plotiphar Paired',
 			options: [],
 			defaultStyle: {
-				bgcolor: combineRgb(38, 199, 89),
-				color: combineRgb(255, 255, 255),
+				bgcolor: combineRgb(...cueGo),
+				color: combineRgb(...cueLightText),
 			},
 			callback: () => {
 				return state.plotiphar?.pairingState === 'approved'
@@ -496,8 +636,8 @@ export function getFeedbackDefinitions(state: ModuleState): CompanionFeedbackDef
 			name: 'Cloud Relay Enabled',
 			options: [],
 			defaultStyle: {
-				bgcolor: combineRgb(38, 199, 89),
-				color: combineRgb(255, 255, 255),
+				bgcolor: combineRgb(...cueGo),
+				color: combineRgb(...cueLightText),
 			},
 			callback: () => {
 				return state.network?.relayEnabled === true

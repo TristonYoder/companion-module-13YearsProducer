@@ -9,12 +9,15 @@ import {
 	APP_MODES,
 	PCO_PLAN_FILTERS,
 	HOUR_FORMAT_THRESHOLDS,
+	CLOCK_FORMATS,
+	isClockFormat,
+	type ClockFormatValue,
 	SCHEDULE_RECURRENCES,
 	nextCueStateInCycle,
 	type PlanItemUpdateBody,
 	type RoleUpdateBody,
 } from './types.js'
-import { lengthFromOption, normalizeClockTime } from './timerEntry.js'
+import { endAtTimeText, lengthFromOption, normalizeClockTime } from './timerEntry.js'
 import type { TimerEntrySign } from './timerEntry.js'
 
 export interface ActionDeps {
@@ -64,6 +67,16 @@ function explainWaypointFailure(err: ApiError): string | undefined {
 	return undefined
 }
 
+const NEEDS_1_7 = 'needs 13 Years 1.7.0 or later on the Producer'
+const NEEDS_1_6 = 'needs 13 Years 1.6.0 or later on the Producer'
+
+function explainUnknownRoute(feature: string, more?: (err: ApiError) => string | undefined) {
+	return (err: ApiError): string | undefined => {
+		if (err.status === 404 && err.message === 'Unknown path') return `${feature} ${NEEDS_1_7}.`
+		return more?.(err)
+	}
+}
+
 const START_TIMER_OPTION = {
 	type: 'checkbox',
 	id: 'startTimer',
@@ -100,6 +113,7 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 	const waypointChoices = deps.state.waypointChoices()
 	const scheduleChoices = deps.state.scheduleChoices()
 	const eventTimeChoices = deps.state.eventTimeChoices()
+	const rehearsalTimeChoices = [{ id: '', label: 'First rehearsal time' }, ...deps.state.rehearsalTimeChoices()]
 	const serviceTypeChoices = (deps.state.pco?.serviceTypes ?? []).map((t) => ({ id: t.id, label: t.name }))
 	const planChoices = (deps.state.pco?.plans ?? []).map((p) => ({ id: p.id, label: p.title }))
 	const noteCategoryChoices = (deps.state.pco?.noteCategories ?? []).map((c) => ({ id: c.id, label: c.name }))
@@ -323,6 +337,55 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 			}, deps),
 		},
 
+		timerEntryEndAt: {
+			name: 'Timer Entry: End @ Mode',
+			description:
+				'Switches the keypad to End @: type a clock time (24-hour, or pick AM/PM) and Enter makes the live item end then, the next time that time comes round. Switching either way empties the entry.',
+			options: [
+				{
+					type: 'dropdown',
+					id: 'mode',
+					label: 'End @',
+					choices: [
+						{ id: 'toggle', label: 'Toggle' },
+						{ id: 'on', label: 'On' },
+						{ id: 'off', label: 'Off' },
+					],
+					default: 'toggle',
+				},
+			],
+			callback: guarded(async (action) => {
+				const mode = optString(action.options.mode)
+				const on = mode === 'on' ? true : mode === 'off' ? false : !deps.state.timerEntryEndAt
+				deps.state.setTimerEntryEndAt(on)
+				deps.refresh()
+			}, deps),
+		},
+
+		timerEntryMeridiem: {
+			name: 'Timer Entry: AM/PM (End @)',
+			description:
+				'In End @ mode, reads the typed time as AM or PM; pressing the one already picked goes back to 24-hour. Does nothing outside End @, so it can share a key with a sign.',
+			options: [
+				{
+					type: 'dropdown',
+					id: 'meridiem',
+					label: 'AM/PM',
+					choices: [
+						{ id: 'am', label: 'AM' },
+						{ id: 'pm', label: 'PM' },
+					],
+					default: 'am',
+				},
+			],
+			callback: guarded(async (action) => {
+				const meridiem = optString(action.options.meridiem)
+				if (meridiem !== 'am' && meridiem !== 'pm') return
+				deps.state.setTimerEntryMeridiem(meridiem)
+				deps.refresh()
+			}, deps),
+		},
+
 		timerEntryBackspace: {
 			name: 'Timer Entry: Backspace',
 			options: [],
@@ -344,17 +407,27 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 		timerEntryCommit: {
 			name: 'Timer Entry: Enter (Commit)',
 			options: [],
-			callback: guarded(async () => {
-				const input = deps.state.timerEntryBuffer
-				if (!deps.state.timerEntryAction) {
-					deps.state.clearTimerEntry()
+			callback: guarded(
+				async () => {
+					const input = deps.state.timerEntryBuffer
+					const entry = deps.state.timerEntryAction
+					if (!entry) {
+						deps.state.resetTimerEntry()
+						deps.refresh()
+						return
+					}
+					if (entry.kind === 'endAt') await deps.api.timerEndAt(endAtTimeText(entry))
+					else await deps.api.timerSetRemaining({ input })
+					deps.state.resetTimerEntry()
 					deps.refresh()
-					return
-				}
-				await deps.api.timerSetRemaining({ input })
-				deps.state.clearTimerEntry()
-				deps.refresh()
-			}, deps),
+				},
+				deps,
+				(err) => {
+					if (!deps.state.timerEntryEndAt) return undefined
+					if (err.status === 404 && err.message === 'Unknown path') return `End @ ${NEEDS_1_6}.`
+					return err.status === 409 ? 'There is no active item to set an end time on.' : undefined
+				},
+			),
 		},
 
 		timerEndAt: {
@@ -381,7 +454,10 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 					await deps.api.timerEndAt(time)
 				},
 				deps,
-				(err) => (err.status === 409 ? 'There is no active item to set an end time on.' : undefined),
+				(err) => {
+					if (err.status === 404 && err.message === 'Unknown path') return `Timer: End At ${NEEDS_1_6}.`
+					return err.status === 409 ? 'There is no active item to set an end time on.' : undefined
+				},
 			),
 		},
 
@@ -935,6 +1011,17 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 					default: false,
 				},
 				{
+					type: 'dropdown',
+					id: 'clockFormat',
+					label: 'Clock format on this role\u2019s pagers',
+					choices: [
+						{ id: '', label: 'Leave unchanged' },
+						{ id: 'default', label: 'Follow the Producer' },
+						...CLOCK_FORMATS,
+					],
+					default: '',
+				},
+				{
 					type: 'checkbox',
 					id: 'setNoteCategories',
 					label: 'Replace the assigned note categories',
@@ -958,6 +1045,8 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 				if (name) body.name = name
 				if (action.options.clearPerson === true) body.personName = ''
 				else if (personName) body.personName = personName
+				const clockFormat = optString(action.options.clockFormat)
+				if (clockFormat === 'default' || isClockFormat(clockFormat)) body.clockFormat = clockFormat
 				if (action.options.setNoteCategories === true) {
 					const selected = action.options.assignedNoteCategories
 					body.assignedNoteCategories = Array.isArray(selected) ? selected.map(optString).filter(Boolean) : []
@@ -1069,7 +1158,43 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 			],
 			callback: guarded(async (action) => {
 				const hourFormatThreshold = optString(action.options.hourFormatThreshold)
-				await deps.api.updateSettings(hourFormatThreshold)
+				await deps.api.updateSettings({ hourFormatThreshold })
+			}, deps),
+		},
+
+		setClockFormat: {
+			name: 'Set Clock Format (12/24-hour)',
+			description:
+				"Sets how the pagers show the producer clock and times of day. Roles with their own clock format keep it. Toggle flips the Producer's current setting.",
+			options: [
+				{
+					type: 'dropdown',
+					id: 'format',
+					label: 'Clock format',
+					choices: [...CLOCK_FORMATS, { id: 'toggle', label: 'Toggle 12/24-hour' }],
+					default: 'toggle',
+				},
+			],
+			callback: guarded(async (action) => {
+				const requested = optString(action.options.format)
+				let format: ClockFormatValue
+				if (requested === 'toggle') {
+					const current = deps.state.clockFormat
+					if (!current) {
+						deps.log('warn', `Toggling the clock format ${NEEDS_1_7}.`)
+						return
+					}
+					format = current === 'twelveHour' ? 'twentyFourHour' : 'twelveHour'
+				} else if (isClockFormat(requested)) {
+					format = requested
+				} else {
+					deps.log('warn', `Set Clock Format needs 12-hour or 24-hour, not "${requested}".`)
+					return
+				}
+				const settings = await deps.api.updateSettings({ clockFormat: format })
+				if (!isClockFormat(settings?.clockFormat)) {
+					deps.log('warn', `Setting the clock format ${NEEDS_1_7}; this one ignored it.`)
+				}
 			}, deps),
 		},
 
@@ -1157,7 +1282,7 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 		waypointGo: {
 			name: 'Go To Waypoint',
 			description:
-				'Jumps the service to whichever item carries this waypoint. Warns rather than fails silently when the waypoint is unassigned in this week\u2019s plan.',
+				'Jumps the event to whichever item carries this waypoint. Warns rather than fails silently when the waypoint is unassigned in this week\u2019s plan.',
 			options: [
 				{
 					type: 'dropdown',
@@ -1356,7 +1481,7 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 		scheduleCreate: {
 			name: 'Create Schedule',
 			description:
-				'Adds a service schedule. Start time is ISO-8601 (2026-10-18T10:00:00-04:00); without an offset it is read as this machine\u2019s local time.',
+				'Adds an event schedule. Start time is ISO-8601 (2026-10-18T10:00:00-04:00); without an offset it is read as this machine\u2019s local time.',
 			options: [
 				{ type: 'textinput', id: 'title', label: 'Title', default: '', useVariables: true },
 				{
@@ -1439,9 +1564,133 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 			),
 		},
 
+		planSkipItem: {
+			name: 'Skip / Unskip Item',
+			description:
+				'Skips an item for the live event time (rehearsal has its own list): it is dimmed in the run sheet and passed over by Next, Previous and the next item the pagers show. Jumping straight to it still works.',
+			options: [
+				{
+					type: 'dropdown',
+					id: 'target',
+					label: 'Item',
+					choices: [
+						{ id: 'next', label: 'The next item' },
+						{ id: 'live', label: 'The live item' },
+						{ id: 'item', label: 'A specific item' },
+					],
+					default: 'next',
+				},
+				{
+					type: 'dropdown',
+					id: 'itemId',
+					label: 'Plan item',
+					choices: planItemChoices,
+					default: planItemChoices[0]?.id ?? '',
+					allowCustom: true,
+					isVisibleExpression: "$(options:target) == 'item'",
+				},
+				{
+					type: 'dropdown',
+					id: 'mode',
+					label: 'Action',
+					choices: [
+						{ id: 'skip', label: 'Skip' },
+						{ id: 'unskip', label: 'Unskip' },
+						{ id: 'toggle', label: 'Toggle' },
+					],
+					default: 'toggle',
+				},
+			],
+			callback: guarded(
+				async (action) => {
+					const target = optString(action.options.target) || 'next'
+					const itemId =
+						target === 'live'
+							? deps.state.timer?.item.id
+							: target === 'item'
+								? optString(action.options.itemId).trim()
+								: deps.state.nextPlanItem()?.id
+					if (!itemId) {
+						deps.log(
+							'warn',
+							target === 'item' ? 'Skip / Unskip Item needs a plan item.' : `There is no ${target} item to skip.`,
+						)
+						return
+					}
+					const mode = optString(action.options.mode)
+					const skipped = mode === 'skip' ? true : mode === 'unskip' ? false : !deps.state.isItemSkipped(itemId)
+					await deps.api.setItemSkipped(itemId, skipped)
+				},
+				deps,
+				explainUnknownRoute('Skipping items', (err) => {
+					if (err.status === 404) return 'That item is not in the plan currently loaded.'
+					if (err.status === 400) return 'Headers cannot be skipped.'
+					return undefined
+				}),
+			),
+		},
+
+		rehearsalMode: {
+			name: 'Rehearsal Mode',
+			description:
+				'Rehearsal times the run sheet from a Planning Center rehearsal time, records no actuals and does not step Planning Center Live. Turning it off returns to the live event time, which rehearsal never changes.',
+			options: [
+				{
+					type: 'dropdown',
+					id: 'mode',
+					label: 'Rehearsal',
+					choices: [
+						{ id: 'on', label: 'On' },
+						{ id: 'off', label: 'Off' },
+						{ id: 'toggle', label: 'Toggle' },
+					],
+					default: 'toggle',
+				},
+				{
+					type: 'dropdown',
+					id: 'planTimeId',
+					label: 'Rehearsal time',
+					choices: rehearsalTimeChoices,
+					default: '',
+					allowCustom: true,
+					isVisibleExpression: "$(options:mode) != 'off'",
+				},
+			],
+			callback: guarded(
+				async (action) => {
+					const mode = optString(action.options.mode)
+					const enabled = mode === 'on' ? true : mode === 'off' ? false : !deps.state.isRehearsalMode
+					const planTimeId = optString(action.options.planTimeId).trim()
+					await deps.api.setRehearsal(enabled, enabled && planTimeId ? planTimeId : undefined)
+				},
+				deps,
+				explainUnknownRoute('Rehearsal mode', (err) =>
+					err.status === 404 ? 'That is not a rehearsal time of the plan currently loaded.' : undefined,
+				),
+			),
+		},
+
+		actualsSaveToPco: {
+			name: 'Save Actual Lengths To Planning Center',
+			description:
+				'Writes the recorded actual lengths into the Planning Center plan: every synced item whose actual differs gets it as its planned length (Planning Center keeps one length per item, for every event time).',
+			options: [],
+			callback: guarded(
+				async () => {
+					const reply = await deps.api.saveActualsToPco()
+					deps.log('info', `Saving ${reply?.count ?? 0} actual length(s) to Planning Center.`)
+				},
+				deps,
+				explainUnknownRoute('Saving actuals', (err) => {
+					if (err.status !== 409) return undefined
+					return `Nothing saved: ${err.message.replace(/\.$/, '')}.`
+				}),
+			),
+		},
+
 		scheduleGoLive: {
 			name: 'Bring Schedule Live Now',
-			description: 'Loads a scheduled service immediately rather than waiting for its go-live time.',
+			description: 'Loads a scheduled event immediately rather than waiting for its go-live time.',
 			options: [
 				{
 					type: 'dropdown',
@@ -1459,7 +1708,7 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 
 		scheduleGoLiveNext: {
 			name: 'Bring Next Schedule Live Now',
-			description: 'Whichever service the app says is next — no dropdown to keep current as schedules come and go.',
+			description: 'Whichever event the app says is next — no dropdown to keep current as schedules come and go.',
 			options: [],
 			callback: guarded(async () => {
 				const next = deps.state.nextSchedule
@@ -1498,7 +1747,7 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 
 		scheduleSetOffset: {
 			name: 'Set Schedule Lead Time',
-			description: 'How many minutes before the service start the app brings it up.',
+			description: 'How many minutes before the event start the app brings it up.',
 			options: [
 				{
 					type: 'dropdown',

@@ -54,6 +54,10 @@ let icons: [(id: String, codepoint: UInt32, faName: String)] = [
     ("settings", 0xF013, "gear"),
     ("producerControl", 0xF1DE, "sliders"),
     ("livePreview", 0xF26C, "tv"),
+    ("skip", 0xF051, "forward-step"),
+    ("rehearsal", 0xF630, "masks-theater"),
+    ("actuals", 0xF46C, "clipboard-check"),
+    ("music", 0xF001, "music"),
 ]
 
 func solidFont(size: CGFloat) -> CTFont? {
@@ -201,11 +205,11 @@ for icon in icons {
         FileHandle.standardError.write("warning: couldn't render \(icon.id) (\(icon.faName))\n".data(using: .utf8)!)
         continue
     }
-    lightEntries.append("\t/** Font Awesome: \(icon.faName) */\n\t\(icon.id): '\(light.base64EncodedString())',")
-    darkEntries.append("\t/** Font Awesome: \(icon.faName) */\n\t\(icon.id): '\(dark.base64EncodedString())',")
+    lightEntries.append("\t\(icon.id): '\(light.base64EncodedString())',")
+    darkEntries.append("\t\(icon.id): '\(dark.base64EncodedString())',")
     if let plateFont = solidFont(size: platePointSize),
        let plated = renderPlatedIcon(codepoint: icon.codepoint, font: plateFont, ink: white, plateAlpha: 0.55) {
-        plateEntries.append("\t/** Font Awesome: \(icon.faName), over the gradient plate */\n\t\(icon.id): '\(plated.base64EncodedString())',")
+        plateEntries.append("\t\(icon.id): '\(plated.base64EncodedString())',")
     }
     rendered += 1
 }
@@ -215,31 +219,19 @@ guard let gradient = renderGradient() else {
     exit(1)
 }
 
-let header = """
-"""
-
 let output = """
-\(header)
-
-/** Icon id (as `src/presets.ts` names it) → base64 PNG, white ink. */
 export const ICONS: Record<string, string> = {
 \(lightEntries.joined(separator: "\n"))
 }
 
-/** The same glyphs in near-black, for a button a feedback has lit up. */
 export const ICONS_DARK: Record<string, string> = {
 \(darkEntries.joined(separator: "\n"))
 }
 
-/**
- * Icon already flattened onto the gradient plate — what an info or action
- * button hands Companion as its single `png64`.
- */
 export const ICON_PLATES: Record<string, string> = {
 \(plateEntries.joined(separator: "\n"))
 }
 
-/** The plate on its own, for a button that wants the wash with no icon. */
 export const BUTTON_GRADIENT = '\(gradient.base64EncodedString())'
 
 """

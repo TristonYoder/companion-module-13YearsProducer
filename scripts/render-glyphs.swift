@@ -69,6 +69,9 @@ let keys: [Key] = [
     Key(id: "minus", text: "\u{2212}"),
     Key(id: "enter", text: "\u{21B5}"),
     Key(id: "backspace", text: "\u{232B}"),
+    Key(id: "endAt", text: "End @"),
+    Key(id: "am", text: "AM"),
+    Key(id: "pm", text: "PM"),
 ]
 
 func registerFonts(in directory: String) {
@@ -183,16 +186,23 @@ for key in keys where !covers(key.text, font: font) {
     )
 }
 
+let maxInkWidth = canvasSize * 0.86
+
+func fittedFont(for text: String) -> CTFont {
+    let attributed = NSAttributedString(string: text, attributes: [kCTFontAttributeName as NSAttributedString.Key: font])
+    let width = CTLineGetBoundsWithOptions(CTLineCreateWithAttributedString(attributed), .useGlyphPathBounds).width
+    return width > maxInkWidth ? interFont(keyWeight, size: pointSize * maxInkWidth / width) : font
+}
+
 var maps: [String] = []
 for ink in inks {
     var lines: [String] = []
     for key in keys {
-        let base64 = renderPNG(text: key.text, font: font, ink: ink.color).base64EncodedString()
+        let base64 = renderPNG(text: key.text, font: fittedFont(for: key.text), ink: ink.color).base64EncodedString()
         lines.append("\t'\(key.id)': '\(base64)',")
     }
     maps.append(
         """
-        /** Key id (as `src/presets.ts` names it) → base64 PNG — \(ink.describe). */
         export const \(ink.mapName): Record<string, string> = {
         \(lines.joined(separator: "\n"))
         }
@@ -200,10 +210,7 @@ for ink in inks {
     )
 }
 
-let header = """
-"""
-
-let output = header + "\n" + maps.joined(separator: "\n\n") + "\n"
+let output = maps.joined(separator: "\n\n") + "\n"
 try output.write(toFile: outputPath, atomically: true, encoding: .utf8)
 
 let prettier = Process()

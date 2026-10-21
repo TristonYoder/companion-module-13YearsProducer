@@ -378,3 +378,107 @@ describe('sync protocol v2', () => {
 		},
 	)
 })
+
+describe('run sheet and clock format (13 Years 1.7.0 and later)', () => {
+	const unknownPath = (err) => err instanceof ApiError && err.status === 404 && err.message === 'Unknown path'
+
+	test('settings.clockFormat, when present, is twelveHour or twentyFourHour', async (t) => {
+		const state = await api.getState()
+		if (state.settings.clockFormat === undefined) return t.skip('app does not report a clock format')
+		assert.match(state.settings.clockFormat, /^(twelveHour|twentyFourHour)$/)
+	})
+
+	test('PATCH /v1/settings flips clockFormat and back, and rejects an unknown value', async (t) => {
+		const before = (await api.getState()).settings.clockFormat
+		if (before === undefined) return t.skip('app does not report a clock format')
+		const other = before === 'twelveHour' ? 'twentyFourHour' : 'twelveHour'
+		try {
+			const flipped = await api.updateSettings({ clockFormat: other })
+			assert.equal(flipped.clockFormat, other)
+		} finally {
+			await api.updateSettings({ clockFormat: before })
+		}
+		assert.equal((await api.getSettings()).clockFormat, before)
+		await assert.rejects(api.updateSettings({ clockFormat: 'sundial' }), (err) => err.status === 400)
+	})
+
+	test('PATCH /v1/roles/{id} rejects an unknown clockFormat without changing the role', async (t) => {
+		const state = await api.getState()
+		if (state.settings.clockFormat === undefined) return t.skip('app does not report a clock format')
+		const role = state.roles[0]
+		if (!role) return t.skip('no roles on the show under test')
+		await assert.rejects(
+			api.updateRole(role.id, { name: 'renamed', clockFormat: 'sundial' }),
+			(err) => err.status === 400,
+		)
+		assert.equal((await api.getRole(role.id)).name, role.name)
+		assert.ok(
+			role.clockFormat === undefined ||
+				role.clockFormat === null ||
+				/^(twelveHour|twentyFourHour)$/.test(role.clockFormat),
+		)
+	})
+
+	test('liveOps, when present, has the documented shape', async (t) => {
+		const { liveOps } = await api.getState()
+		if (liveOps === undefined) return t.skip('app does not report liveOps')
+		assert.equal(typeof liveOps.isRehearsalMode, 'boolean')
+		assert.ok(Array.isArray(liveOps.actuals))
+		assert.equal(typeof liveOps.skippedItemIds, 'object')
+		for (const actual of liveOps.actuals) {
+			assert.equal(typeof actual.itemId, 'string')
+			assert.equal(typeof actual.startedAt, 'string')
+		}
+	})
+
+	test('GET /v1/plan/actuals reports the live event time and whether it is logging', async (t) => {
+		const reply = await api.getActuals().catch((err) => (unknownPath(err) ? null : Promise.reject(err)))
+		if (!reply) return t.skip('app has no actuals route')
+		assert.equal(typeof reply.isLogging, 'boolean')
+		assert.ok(Array.isArray(reply.actuals))
+	})
+
+	test('skipping an item and unskipping it round-trips through GET /v1/plan/skips', async (t) => {
+		const skips = await api.getSkips().catch((err) => (unknownPath(err) ? null : Promise.reject(err)))
+		if (!skips) return t.skip('app has no skips route')
+		assert.ok(Array.isArray(skips.skippedItemIds))
+		assert.equal(typeof skips.all, 'object')
+		const state = await api.getState()
+		const candidate = state.plan.items.find(
+			(item) => item.itemType.toLowerCase() !== 'header' && item.id !== state.timer?.item.id,
+		)
+		if (!candidate) return t.skip('no item other than the live one to skip')
+		const wasSkipped = skips.skippedItemIds.includes(candidate.id)
+		try {
+			const changed = await api.setItemSkipped(candidate.id, !wasSkipped)
+			assert.equal(changed.skippedItemIds.includes(candidate.id), !wasSkipped)
+		} finally {
+			await api.setItemSkipped(candidate.id, wasSkipped)
+		}
+		assert.equal((await api.getSkips()).skippedItemIds.includes(candidate.id), wasSkipped)
+		await assert.rejects(api.setItemSkipped('no-such-item', true), (err) => err.status === 404)
+	})
+
+	test('rehearsal mode turns on and back off', async (t) => {
+		const rehearsal = await api.getRehearsal().catch((err) => (unknownPath(err) ? null : Promise.reject(err)))
+		if (!rehearsal) return t.skip('app has no rehearsal route')
+		assert.equal(typeof rehearsal.enabled, 'boolean')
+		assert.ok(Array.isArray(rehearsal.availableTimes))
+		if (rehearsal.enabled) return t.skip('rehearsal is already on; leaving it alone')
+		try {
+			assert.equal((await api.setRehearsal(true)).enabled, true)
+			assert.equal((await api.getState()).liveOps?.isRehearsalMode, true)
+		} finally {
+			await api.setRehearsal(false)
+		}
+		assert.equal((await api.getRehearsal()).enabled, false)
+		await assert.rejects(api.setRehearsal(true, 'no-such-time'), (err) => err.status === 404)
+	})
+
+	test('saving actuals without a Planning Center plan is a 409', async (t) => {
+		const state = await api.getState()
+		if (state.liveOps === undefined) return t.skip('app does not report liveOps')
+		if (state.plan.pcoPlanId) return t.skip('a Planning Center plan is loaded; not writing to it')
+		await assert.rejects(api.saveActualsToPco(), (err) => err.status === 409)
+	})
+})
