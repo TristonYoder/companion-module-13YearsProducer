@@ -21,6 +21,8 @@ const TIMER_FEEDBACK_VARIABLES = new Set([
 	'active_item_remaining_seconds',
 	'active_item_is_overtime',
 	'active_item_progress_pct',
+	'timer_color_hex',
+	'timer_color_effect',
 ])
 
 class ThirteenYearsProducerInstance extends InstanceBase<ModuleConfig> {
@@ -178,7 +180,7 @@ class ThirteenYearsProducerInstance extends InstanceBase<ModuleConfig> {
 	private pushTimerState(): void {
 		const changed = this.pushVariables()
 		if (changed.some((key) => TIMER_FEEDBACK_VARIABLES.has(key))) {
-			this.checkFeedbacks('timerOvertime', 'timerUnderThreshold', 'activeItemProgressBar')
+			this.checkFeedbacks('timerOvertime', 'timerUnderThreshold', 'activeItemProgressBar', 'timerColor')
 		}
 	}
 

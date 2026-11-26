@@ -94,6 +94,12 @@ export function isoWithoutFraction(text: string): string | null {
 	return new Date(ms).toISOString().replace(/\.\d{3}Z$/, 'Z')
 }
 
+/** A schedule's target time from the dropdown value `event:<id>` / `rehearsal:<id>`; empty (or unrecognised) clears it. */
+export function parseScheduleTarget(value: string): { targetKind: string; targetId: string } {
+	const match = /^(event|rehearsal):(.+)$/.exec(value.trim())
+	return match ? { targetKind: match[1], targetId: match[2] } : { targetKind: '', targetId: '' }
+}
+
 const REPEAT_GUARD_OPTION = {
 	type: 'number',
 	id: 'ignoreRepeatMs',
@@ -114,6 +120,11 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 	const scheduleChoices = deps.state.scheduleChoices()
 	const eventTimeChoices = deps.state.eventTimeChoices()
 	const rehearsalTimeChoices = [{ id: '', label: 'First rehearsal time' }, ...deps.state.rehearsalTimeChoices()]
+	const scheduleTargetChoices = [
+		{ id: '', label: 'No target time' },
+		...eventTimeChoices.map((c) => ({ id: `event:${c.id}`, label: `Event: ${c.label}` })),
+		...deps.state.rehearsalTimeChoices().map((c) => ({ id: `rehearsal:${c.id}`, label: `Rehearsal: ${c.label}` })),
+	]
 	const serviceTypeChoices = (deps.state.pco?.serviceTypes ?? []).map((t) => ({ id: t.id, label: t.name }))
 	const planChoices = (deps.state.pco?.plans ?? []).map((p) => ({ id: p.id, label: p.title }))
 	const noteCategoryChoices = (deps.state.pco?.noteCategories ?? []).map((c) => ({ id: c.id, label: c.name }))
@@ -1507,6 +1518,22 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 					default: 'once',
 				},
 				{ type: 'checkbox', id: 'isEnabled', label: 'Enabled', default: true },
+				{
+					type: 'dropdown',
+					id: 'target',
+					label: 'Make this time current at go-live',
+					choices: scheduleTargetChoices,
+					default: '',
+					allowCustom: true,
+					tooltip:
+						'An event or rehearsal time, as event:<id> or rehearsal:<id> when typed. Empty leaves the current time alone.',
+				},
+				{
+					type: 'checkbox',
+					id: 'startsFirstItem',
+					label: 'Start the first item at go-live (fires a pre-show countdown on its own)',
+					default: false,
+				},
 			],
 			callback: guarded(async (action) => {
 				const title = optString(action.options.title).trim()
@@ -1519,6 +1546,9 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 					goLiveOffsetMinutes: Number(action.options.minutes),
 					recurrence: optString(action.options.recurrence) || 'once',
 					isEnabled: action.options.isEnabled !== false,
+					// Only sent when set, so a plain schedule's request is unchanged and older producers never see the new fields.
+					...(optString(action.options.target).trim() ? parseScheduleTarget(optString(action.options.target)) : {}),
+					...(action.options.startsFirstItem === true ? { startsFirstItem: true } : {}),
 				})
 			}, deps),
 		},
@@ -1770,6 +1800,93 @@ export function getActionDefinitions(deps: ActionDeps): CompanionActionDefinitio
 				await deps.api.updateSchedule(optString(action.options.scheduleId), {
 					goLiveOffsetMinutes: Number(action.options.minutes),
 				})
+			}, deps),
+		},
+
+		scheduleSetTarget: {
+			name: 'Set Schedule Target Time',
+			description:
+				'The event or rehearsal time a schedule makes current when it goes live, and whether it then starts the first item (for example an automatic pre-show countdown).',
+			options: [
+				{
+					type: 'dropdown',
+					id: 'scheduleId',
+					label: 'Schedule',
+					choices: scheduleChoices,
+					default: scheduleChoices[0]?.id ?? '',
+					allowCustom: true,
+				},
+				{
+					type: 'dropdown',
+					id: 'target',
+					label: 'Target time',
+					choices: scheduleTargetChoices,
+					default: '',
+					allowCustom: true,
+					tooltip: 'An event or rehearsal time, as event:<id> or rehearsal:<id> when typed. No target time clears it.',
+				},
+				{
+					type: 'dropdown',
+					id: 'startsFirstItem',
+					label: 'Start the first item at go-live',
+					choices: [
+						{ id: 'keep', label: 'Leave as is' },
+						{ id: 'yes', label: 'Yes' },
+						{ id: 'no', label: 'No' },
+					],
+					default: 'keep',
+				},
+			],
+			callback: guarded(async (action) => {
+				const starts = optString(action.options.startsFirstItem)
+				await deps.api.updateSchedule(optString(action.options.scheduleId), {
+					...parseScheduleTarget(optString(action.options.target)),
+					...(starts === 'yes' ? { startsFirstItem: true } : starts === 'no' ? { startsFirstItem: false } : {}),
+				})
+			}, deps),
+		},
+
+		planSetTitle: {
+			name: 'Name Plan',
+			description:
+				'Names the loaded plan. An empty name clears it (the run sheet then shows Unnamed Runsheet). Refused while the plan is linked to Planning Center, which supplies its own name: unlink it first.',
+			options: [{ type: 'textinput', id: 'title', label: 'Plan name', default: '', useVariables: true }],
+			callback: guarded(
+				async (action) => {
+					await deps.api.setPlanTitle(optString(action.options.title).trim())
+				},
+				deps,
+				explainUnknownRoute('Name Plan', (err) =>
+					err.status === 409
+						? 'The plan is linked to Planning Center and takes its name from there. Unlink it first.'
+						: undefined,
+				),
+			),
+		},
+
+		pcoUnlink: {
+			name: 'Unlink Planning Center Plan',
+			description:
+				'Cuts the link to Planning Center so the loaded plan runs only in 13 Years. Items, notes, waypoints and event and rehearsal times stay and become editable; syncing, live control and saving actual lengths back stop. Sync a plan to link a new one.',
+			options: [],
+			callback: guarded(
+				async () => {
+					await deps.api.unlinkPco()
+				},
+				deps,
+				explainUnknownRoute('Unlink Planning Center Plan', (err) =>
+					err.status === 409 ? 'No Planning Center plan is linked.' : undefined,
+				),
+			),
+		},
+
+		timerColorsReset: {
+			name: 'Reset Timer Colors',
+			description:
+				'Puts the producer-wide timer color scale back to the standard one. Items and waypoints keep their own scales.',
+			options: [],
+			callback: guarded(async () => {
+				await deps.api.updateSettings({ timerColors: {} })
 			}, deps),
 		},
 

@@ -2,6 +2,7 @@ import { combineRgb, type CompanionFeedbackDefinitions } from '@companion-module
 import type { ModuleState } from './state.js'
 import { progressBarPng } from './progress.js'
 import { RUNDOWN_ROWS } from './state.js'
+import { hexToRgbNumber } from './timerColors.js'
 import {
 	companionDisabledFill,
 	companionDisabledText,
@@ -299,6 +300,34 @@ export function getFeedbackDefinitions(state: ModuleState): CompanionFeedbackDef
 			},
 			callback: (feedback) => {
 				return state.clockFormat === optString(feedback.options.format)
+			},
+		},
+
+		timerColor: {
+			type: 'advanced',
+			name: 'Countdown Color (producer’s timer color scale)',
+			description:
+				'Colors the button the way the pagers color the live countdown: from the scale the producer sends (the item’s own, else its waypoint’s, else the producer-wide one). Nothing changes while the producer has sent no scale or the level is the normal text color.',
+			options: [
+				{
+					type: 'dropdown',
+					id: 'target',
+					label: 'Apply the color to',
+					choices: [
+						{ id: 'text', label: 'Text' },
+						{ id: 'background', label: 'Background (text turns dark or light to stay readable)' },
+					],
+					default: 'text',
+				},
+			],
+			callback: (feedback) => {
+				const rgb = hexToRgbNumber(state.timerColor.colorHex)
+				if (rgb === null) return {}
+				if (optString(feedback.options.target) === 'background') {
+					const luma = (0.299 * ((rgb >> 16) & 255) + 0.587 * ((rgb >> 8) & 255) + 0.114 * (rgb & 255)) / 255
+					return { bgcolor: rgb, color: luma > 0.6 ? combineRgb(...cueDarkText) : combineRgb(...cueLightText) }
+				}
+				return { color: rgb }
 			},
 		},
 

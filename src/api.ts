@@ -362,6 +362,14 @@ export class ControlApi {
 		return this.send('PATCH', '/settings', body)
 	}
 
+	async setPlanTitle(title: string): Promise<ControlAPIState> {
+		return this.send('PATCH', '/plan/title', { title })
+	}
+
+	async unlinkPco(): Promise<ControlAPIState> {
+		return this.send('POST', '/pco/unlink')
+	}
+
 	async listMessages(): Promise<InterTeamMessage[]> {
 		return this.get('/messages')
 	}
@@ -425,7 +433,7 @@ export class ControlApi {
 		return this.get('/schedules')
 	}
 
-	async createSchedule(body: ScheduleCreateBody): Promise<ScheduleStatus> {
+	async createSchedule(body: ScheduleCreateBody): Promise<ScheduleEntry> {
 		return this.send('POST', '/schedules', body)
 	}
 
