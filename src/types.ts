@@ -142,7 +142,27 @@ export interface TimerAnchor {
 	isDurationActual: boolean
 }
 
+export interface TimerColorStop {
+	id?: string
+	/** 'remaining' (lead-up, the default) or 'overtime'. */
+	phase?: 'remaining' | 'overtime'
+	value: number
+	unit: 'seconds' | 'percent'
+	colorHex: string
+	effect?: string
+}
+
+export interface TimerColorScale {
+	onTimeHex?: string | null
+	stops: TimerColorStop[]
+	overtimeHex: string
+	overtimeEffect?: string
+	overtimeStart?: { value: number; unit: 'seconds' | 'percent' }
+}
+
 export interface ActiveTimer {
+	/** The scale in effect for the active item; omitted when it is the standard one. */
+	colors?: TimerColorScale | null
 	item: PCOTimerItem
 	index: number
 	isRunning: boolean
@@ -246,6 +266,8 @@ export function isClockFormat(value: unknown): value is ClockFormatValue {
 export interface SettingsStatus {
 	hourFormatThreshold: HourFormatThreshold
 	clockFormat?: ClockFormatValue | ''
+	/** The producer-wide timer color scale; always present while there is an active item. */
+	timerColors?: TimerColorScale | null
 	controlAPIPort: number
 	connectedAPIClients: number
 }
@@ -271,6 +293,11 @@ export interface ScheduleEntry {
 	recurrence: string
 	isEnabled: boolean
 	lastFiredAt: string | null
+	/** Which kind of time the schedule makes current when it goes live. */
+	targetKind?: 'event' | 'rehearsal' | null
+	targetId?: string | null
+	/** Starts the first non-header item when the schedule goes live. */
+	startsFirstItem?: boolean
 }
 
 export interface ScheduleStatus {
@@ -356,6 +383,8 @@ export interface SaveActualsReply {
 export interface SettingsUpdateBody {
 	hourFormatThreshold?: string
 	clockFormat?: ClockFormatValue
+	/** `{}` resets the producer-wide scale to the standard one. */
+	timerColors?: Partial<TimerColorScale>
 }
 
 export interface ControlAPIState {
@@ -528,6 +557,10 @@ export interface ScheduleCreateBody {
 	pcoPlanId?: string
 	recurrence?: string
 	isEnabled?: boolean
+	/** 'event' or 'rehearsal'; with targetId, the time made current at go-live. An empty value clears it. */
+	targetKind?: string
+	targetId?: string
+	startsFirstItem?: boolean
 }
 
 export interface ScheduleUpdateBody {
@@ -539,6 +572,13 @@ export interface ScheduleUpdateBody {
 	pcoPlanId?: string
 	recurrence?: string
 	isEnabled?: boolean
+	targetKind?: string
+	targetId?: string
+	startsFirstItem?: boolean
+}
+
+export interface PlanTitleBody {
+	title: string
 }
 
 export function optString(value: unknown): string {

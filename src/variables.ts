@@ -62,6 +62,15 @@ export function getVariableDefinitions(state: ModuleState): CompanionVariableDef
 		{ variableId: 'active_item_overtime_text', name: 'Active Item Overtime (+m:ss, blank when not over)' },
 		{ variableId: 'item_ends_at', name: 'Active Item Ends At (local HH:MM:SS, while running)' },
 		{ variableId: 'active_item_is_overtime', name: 'Active Item Is Overtime' },
+		{
+			variableId: 'timer_color_hex',
+			name: 'Countdown Color (RRGGBB from the producer’s timer color scale; empty for the normal text color)',
+		},
+		{
+			variableId: 'timer_color_level',
+			name: 'Countdown Color Level (none, on_time, lead_up, overtime, overtime_deep)',
+		},
+		{ variableId: 'timer_color_effect', name: 'Countdown Effect (none, pulse, blink, flicker, glitch)' },
 		{ variableId: 'active_item_is_running', name: 'Active Item Is Running' },
 		{ variableId: 'active_item_duration_type', name: 'Active Item Duration Type (Projected/Actual)' },
 		{ variableId: 'next_item_title', name: 'Next Item Title' },
@@ -172,6 +181,7 @@ export function getVariableDefinitions(state: ModuleState): CompanionVariableDef
 export function getVariableValues(state: ModuleState): CompanionVariableValues {
 	const plotiphar = state.plotiphar
 	const nextSchedule = state.nextSchedule
+	const timerColor = state.timerColor
 	const nextItem = state.nextPlanItem()
 	const eventRemaining =
 		state.serviceRemainingSeconds === null ? '' : state.formatSeconds(state.serviceRemainingSeconds)
@@ -217,6 +227,9 @@ export function getVariableValues(state: ModuleState): CompanionVariableValues {
 		active_item_overtime_text: state.activeItemOvertimeText,
 		item_ends_at: state.itemEndsAtText,
 		active_item_is_overtime: state.timerIsOvertime ? 'yes' : 'no',
+		timer_color_hex: timerColor.colorHex ?? '',
+		timer_color_level: timerColor.level,
+		timer_color_effect: timerColor.effect,
 		active_item_is_running: state.timer?.isRunning ? 'yes' : 'no',
 		active_item_duration_type: state.timer?.isDurationActualForDisplay ? 'Actual' : 'Projected',
 		next_item_title: nextItem?.title ?? '',

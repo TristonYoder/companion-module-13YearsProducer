@@ -922,5 +922,53 @@ export function getPresetDefinitions(
 		steps: [{ down: [], up: [] }],
 	}
 
+	presets['timer_color_text'] = {
+		type: 'button',
+		category: 'Timer Colors',
+		name: 'Countdown (text takes the producer’s timer color)',
+		style: face({
+			label: '$(13yearsproducer:active_item_title)\\n$(13yearsproducer:active_item_remaining)',
+			color: DARK,
+			size: 'auto',
+		}),
+		feedbacks: [{ feedbackId: 'timerColor', options: { target: 'text' }, style: {} }],
+		steps: [{ down: [], up: [] }],
+	}
+
+	presets['timer_color_background'] = {
+		type: 'button',
+		category: 'Timer Colors',
+		name: 'Countdown (background takes the producer’s timer color)',
+		style: face({
+			label: '$(13yearsproducer:active_item_title)\\n$(13yearsproducer:active_item_remaining)',
+			color: DARK,
+			size: 'auto',
+		}),
+		feedbacks: [{ feedbackId: 'timerColor', options: { target: 'background' }, style: {} }],
+		steps: [{ down: [], up: [] }],
+	}
+
+	presets['timer_color_level'] = {
+		type: 'button',
+		category: 'Timer Colors',
+		name: 'Countdown Color Level (status)',
+		style: face({
+			label: '$(13yearsproducer:timer_color_level)\\n$(13yearsproducer:timer_color_effect)',
+			color: DARK,
+			size: '14',
+		}),
+		feedbacks: [{ feedbackId: 'timerColor', options: { target: 'background' }, style: {} }],
+		steps: [{ down: [], up: [] }],
+	}
+
+	presets['timer_colors_reset'] = {
+		type: 'button',
+		category: 'Timer Colors',
+		name: 'Reset Producer-Wide Timer Colors',
+		style: face({ label: 'Reset\\nTimer Colors', color: GREY, size: '14' }),
+		feedbacks: [],
+		steps: [{ down: [{ actionId: 'timerColorsReset', options: {} }], up: [] }],
+	}
+
 	return presets
 }

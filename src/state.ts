@@ -13,7 +13,9 @@ import {
 import type { Meridiem, TimerEntrySign, TimerInputAction } from './timerEntry.js'
 import { isHeaderItem } from './itemDetails.js'
 import { isClockFormat } from './types.js'
+import { timerColorStyle, type TimerColorStyle } from './timerColors.js'
 import type {
+	TimerColorScale,
 	ActiveTimer,
 	ClockFormatValue,
 	ControlAPIState,
@@ -324,6 +326,17 @@ export class ModuleState {
 		const timer = this.timer
 		if (!timer) return 0
 		return this.timerAnchor?.lengthInSeconds ?? timer.item?.lengthInSeconds ?? 0
+	}
+
+	/** The scale in effect for the active item: the item's own, else the producer-wide one. Null when none was sent. */
+	get timerColorScale(): TimerColorScale | null {
+		if (!this.timer) return null
+		return this.timer.colors ?? this.settings?.timerColors ?? null
+	}
+
+	/** The countdown's color and effect right now, from the scale the producer sent (never an assumed one). */
+	get timerColor(): TimerColorStyle {
+		return timerColorStyle(this.timerColorScale, this.timerRemainingSeconds, this.timerLengthSeconds)
 	}
 
 	get activeItemElapsedText(): string {
